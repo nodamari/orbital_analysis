@@ -9,6 +9,14 @@ def eccentric_anomaly(E, M, eccentricity):
     M = np.radians(M)
     return E - (eccentricity*np.sin(E)) - M
 
+def angle(v1, v2):
+    v1 = v1.T
+    v2 = v2.T
+    unit_v1 = v1 / np.linalg.norm(v1)
+    unit_v2 = v2 / np.linalg.norm(v2)
+    dot_product = np.dot(unit_v1, unit_v2)
+
+    return np.arccos(dot_product)
 
 def distance(r, t, a, b):
     """
@@ -25,7 +33,7 @@ def distance(r, t, a, b):
 
 
 def ellipse(a, b):
-    x = a * np.cos(np.linspace(-np.pi, 0, 250))
+    x = a * np.cos(np.linspace(-np.pi, 0, 550))
     x_return = x[len(x): 0: -1]
 
     y = np.sqrt(((1 - ((np.multiply(x, x)) / a ** 2)) * (b ** 2)))
@@ -59,6 +67,7 @@ class TLE:
     def __init__(self, input):
         self.norad_cat_id = input[1]
         self.epoch = float(input[3])
+        self.bstar = float(input[4])
         self.inclination = float(input[11])
         self.right_ascension = float(input[12])
         self.eccentricity = float('0.' + input[13])
@@ -116,16 +125,24 @@ class TLE:
         """
 
         pf_orbit = ellipse(self.a, self.b)
-        pf_orbit[0] -= self.c  # move the ellipse over by the distance from the center of the ellipse to the focus because Earth is defined at being at 0,0,0
+        pf_orbit[0] -= self.c  # move the ellipse over by the distance from the center of the ellipse to the focus because Earth is defined as being at 0,0,0
         self.orbit = rotation313(pf_orbit, self.right_ascension, self.inclination, self.arg_perigee)
 
         return self.orbit
 
     def specific_energy(self):
         perigee = self.ap_peri[1]
-        self.h = np.sqrt(self.a*earth_mu*(1-(self.eccentricity**2)))
-        self.eta = (0.5*((self.h**2)/(perigee**2))) - (earth_mu/perigee)
-        self.h = np.array([0, 0, self.h])
+        self.h = np.zeros((3, 1))
+        h_scalar = np.sqrt(self.a*earth_mu*(1-(self.eccentricity**2)))
+        self.eta = (0.5*((h_scalar**2)/(perigee**2))) - (earth_mu/perigee)
+        if 90 <= self.inclination <= 180:  # account for retrograde orbits
+            self.h[0][0] = 0
+            self.h[1][0] = 0
+            self.h[2][0] = -h_scalar
+        else:
+            self.h[0][0] = 0
+            self.h[1][0] = 0
+            self.h[2][0] = h_scalar
         self.h = rotation313(self.h, self.right_ascension, self.inclination, self.arg_perigee)
         return self.eta, self.h
 
@@ -134,7 +151,8 @@ class TLE:
         Takes in the true anomaly to determine the x and y values of the object in the orbit in the perifocal frame
         """
         self.pos_arr = np.zeros((3, 1))
-        r = fsolve(distance, self.a, args=(self.theta, self.a, self.b))
+        r = fsolve(distance, -self.a, args=(self.theta, self.a, self.b))
+        print(r)
         if r < 0:
             r = -r
         t = np.deg2rad(self.theta)
@@ -156,9 +174,14 @@ class TLE:
         d_dist_mag = np.linalg.norm(self.orbit - pos_mat, axis=0)
         min_idx = np.argmin(d_dist_mag)
         d_arr = np.vstack((self.orbit[0,min_idx], self.orbit[1,min_idx], self.orbit[2,min_idx]))
-        d_arr = d_arr - self.pos_arr
+        if 90 <= self.inclination <= 180:
+            d_arr = d_arr - np.vstack((self.orbit[0,min_idx+1], self.orbit[1,min_idx+1], self.orbit[2,min_idx+1]))
+        else:
+            d_arr = -d_arr + np.vstack((self.orbit[0, min_idx + 1], self.orbit[1, min_idx + 1], self.orbit[2, min_idx + 1]))
         vel_unit = d_arr / np.linalg.norm(d_arr)
         self.vel_arr = vel_unit * vel_scalar
+
+        self.h_angle = angle(self.h, np.cross(self.pos_arr.T, self.vel_arr.T))
 
         return self.vel_arr
 

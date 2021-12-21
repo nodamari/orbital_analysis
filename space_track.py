@@ -1,5 +1,8 @@
 """
-This script requires tle_obj.py to run
+This script requires tle_obj.py and  userpass.txt files to run.
+tle_obj.py is a class object file.
+userpass.txt is a text file containing the username for space-track.org in the first line and the password in the
+second line.
 """
 import datetime as dt
 from spacetrack import SpaceTrackClient
@@ -8,6 +11,22 @@ from tle_obj import TLE
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import ode
+from mpl_toolkits.mplot3d.axes3d import Axes3D
+#plt.style.use('dark_background')
+plt.rcParams.update({
+    "lines.color": "dimgray",
+    "patch.edgecolor": "black",
+    "text.color": "lightgray",
+    "axes.facecolor": "black",
+    "axes.edgecolor": "dimgray",
+    "axes.labelcolor": "darkgray",
+    "xtick.color": "darkgray",
+    "ytick.color": "darkgray",
+    "grid.color": "gray",
+    "figure.facecolor": "black",
+    "figure.edgecolor": "black",
+    "savefig.facecolor": "black",
+    "savefig.edgecolor": "black"})
 
 
 earth_radius = 6378.0 # km
@@ -71,9 +90,10 @@ def diffy_q(t, y, mu):
     # norm of radius vector
     norm_r = np.linalg.norm(r)
 
-    # two-body acceleration
+    # Earth's gravitational acceleration
     ax, ay, az = -r*mu/norm_r**3
 
+    # J2 correction
     r_J2 = -(3 / 2) * J2 * (earth_mu / norm_r ** 2) * ((earth_radius / norm_r) ** 2)
     rx_J2 = r_J2 * (r[0] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 1)
     ry_J2 = r_J2 * (r[1] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 1)
@@ -82,6 +102,10 @@ def diffy_q(t, y, mu):
     ax += rx_J2
     ay += ry_J2
     az += rz_J2
+
+    # atmospheric drag
+    
+
 
     return [vx, vy, vz, ax, ay, az]
 
@@ -94,13 +118,15 @@ if __name__ == '__main__':
     password = contents[1]
 
     st = SpaceTrackClient(user, password)
-    drange = op.inclusive_range(dt.datetime(2021, 11, 26, 12),  dt.datetime(2021, 11, 27, 12))
-
-    drange_next = op.inclusive_range(dt.datetime(2021, 11, 28, 12),  dt.datetime(2021, 11, 29, 12))
+    drange = op.inclusive_range(dt.datetime(2020, 11, 26, 12),  dt.datetime(2020, 11, 27, 12))
+    drange_next = op.inclusive_range(dt.datetime(2020, 11, 28, 12),  dt.datetime(2020, 11, 29, 12))
     iss_tle = st.tle(norad_cat_id=[25544], epoch=drange, limit=1,  format='tle')
     iss_next_tle = st.tle(norad_cat_id=[25544], epoch=drange_next, limit=1,  format='tle')
+    print(iss_tle)
+    print(iss_next_tle)
     iss_tle = tle_cleanup(iss_tle)
     iss_next_tle = tle_cleanup(iss_next_tle)
+    print(iss_tle)
 
 
     """Space-Track data"""
@@ -116,13 +142,16 @@ if __name__ == '__main__':
     equator = circle(earth_radius)
 
 
+
     """Numerical data"""
     # intial position and velocity vectors
     r0 = [iss.pos_arr[0][0], iss.pos_arr[1][0], iss.pos_arr[2][0]]
     v0 = [iss.vel_arr[0][0], iss.vel_arr[1][0], iss.vel_arr[2][0]]
 
     # time span
-    tspan = 48*60*60
+    d_epoch = iss_next.epoch - iss.epoch
+    print(str(d_epoch) + ' days')
+    tspan = int(d_epoch)*24*60*60
 
     # time step
     dt = 50
@@ -158,14 +187,15 @@ if __name__ == '__main__':
     """Plotting"""
     # initialize the figure
     fig = plt.figure()
-    ax = plt.axes(projection='3d')
+    ax = Axes3D(fig, box_aspect=(1, 1, .85))
 
     # plot orbit of object and equator
-    plt.plot(iss_path[0], iss_path[1], iss_path[2], 'm-', label='ISS')
-    ax.plot(iss_next_path[0], iss_next_path[1], iss_next_path[2], 'b-', label='ISS 48 hours')
-    plt.plot(current_pos[0], current_pos[1], current_pos[2], 'mo', label='ISS current position')
-    ax.plot(rs[:, 0], rs[:, 1], rs[:, 2], 'c', label='Numerically calculated trajectory')
-    plt.plot(equator[0], equator[1], equator[2], 'r--', label='Equator')
+    plt.plot(iss_path[0], iss_path[1], iss_path[2], color='deepskyblue', linestyle='solid', linewidth=2,  label='ISS')
+    ax.plot(iss_next_path[0], iss_next_path[1], iss_next_path[2], color='hotpink', linestyle='solid', linewidth=2, label='ISS 48 hours')
+    plt.plot(current_pos[0], current_pos[1], current_pos[2], marker='o', markerfacecolor='deepskyblue', markeredgecolor='deepskyblue', label='ISS current position')
+    ax.plot(rs[:, 0], rs[:, 1], rs[:, 2], color='blueviolet', linestyle='solid', alpha=0.5, label='Numerically calculated trajectory')
+    plt.plot(equator[0], equator[1], equator[2], color='limegreen', linestyle='dashed', label='Equator')
+    ax.quiver(iss.pos_arr[0], iss.pos_arr[1], iss.pos_arr[2],  iss.vel_arr[0]*300,  iss.vel_arr[1]*300, iss.vel_arr[2]*300, color='deepskyblue')
     plt.legend()
 
     # plotting Earth
@@ -178,7 +208,10 @@ if __name__ == '__main__':
     ax.set_xlabel(['X (km)'])
     ax.set_ylabel(['Y (km)'])
     ax.set_zlabel(['Z (km)'])
+    # ax.set_xlim(-45000, 45000)
+    # ax.set_ylim(-45000, 45000)
+    # ax.set_zlim(-45000, 45000)
     plt.legend()
-    ax.plot_surface(_x,_y,_z, cmap='Blues', label='Earth', zorder=1, alpha=0.5)
+    ax.plot_surface(_x,_y,_z, color='honeydew', label='Earth', zorder=1, alpha=0.3)
 
     plt.show()
