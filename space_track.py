@@ -142,7 +142,6 @@ if __name__ == '__main__':
     equator = circle(earth_radius)
 
 
-
     """Numerical data"""
     # intial position and velocity vectors
     r0 = [iss.pos_arr[0][0], iss.pos_arr[1][0], iss.pos_arr[2][0]]
@@ -208,9 +207,6 @@ if __name__ == '__main__':
     ax.set_xlabel(['X (km)'])
     ax.set_ylabel(['Y (km)'])
     ax.set_zlabel(['Z (km)'])
-    # ax.set_xlim(-45000, 45000)
-    # ax.set_ylim(-45000, 45000)
-    # ax.set_zlim(-45000, 45000)
     plt.legend()
     ax.plot_surface(_x,_y,_z, color='honeydew', label='Earth', zorder=1, alpha=0.3)
 

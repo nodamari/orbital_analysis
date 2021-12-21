@@ -9,6 +9,7 @@ def eccentric_anomaly(E, M, eccentricity):
     M = np.radians(M)
     return E - (eccentricity*np.sin(E)) - M
 
+
 def angle(v1, v2):
     v1 = v1.T
     v2 = v2.T
@@ -17,6 +18,7 @@ def angle(v1, v2):
     dot_product = np.dot(unit_v1, unit_v2)
 
     return np.arccos(dot_product)
+
 
 def distance(r, t, a, b):
     """
