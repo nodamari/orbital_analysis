@@ -30,12 +30,11 @@ def distance(r, t, a, b):
     """
     t = np.deg2rad(t)
     #return (((1-(((r*np.cos(t))**2)/(a**2)))*(b**2))**(0.5)) - r*np.sin(t)
-
     return np.sqrt(((1-(((r*np.cos(t))**2)/(a**2)))*(b**2))) - r*np.sin(t)
 
 
 def ellipse(a, b):
-    x = a * np.cos(np.linspace(-np.pi, 0, 550))
+    x = a * np.cos(np.linspace(-np.pi, 0, 600))
     x_return = x[len(x): 0: -1]
 
     y = np.sqrt(((1 - ((np.multiply(x, x)) / a ** 2)) * (b ** 2)))
@@ -151,10 +150,10 @@ class TLE:
     def object_pos(self):
         """
         Takes in the true anomaly to determine the x and y values of the object in the orbit in the perifocal frame
+        and then rotates the point using the 313 rotation.
         """
         self.pos_arr = np.zeros((3, 1))
         r = fsolve(distance, -self.a, args=(self.theta, self.a, self.b))
-        print(r)
         if r < 0:
             r = -r
         t = np.deg2rad(self.theta)
@@ -182,8 +181,6 @@ class TLE:
             d_arr = -d_arr + np.vstack((self.orbit[0, min_idx + 1], self.orbit[1, min_idx + 1], self.orbit[2, min_idx + 1]))
         vel_unit = d_arr / np.linalg.norm(d_arr)
         self.vel_arr = vel_unit * vel_scalar
-
-        self.h_angle = angle(self.h, np.cross(self.pos_arr.T, self.vel_arr.T))
 
         return self.vel_arr
 

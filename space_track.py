@@ -5,28 +5,30 @@ userpass.txt is a text file containing the username for space-track.org in the f
 second line.
 """
 import datetime as dt
+import math
 from spacetrack import SpaceTrackClient
 import spacetrack.operators as op
 from tle_obj import TLE
+from orbital_elements import OE
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import ode
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 #plt.style.use('dark_background')
-plt.rcParams.update({
-    "lines.color": "dimgray",
-    "patch.edgecolor": "black",
-    "text.color": "lightgray",
-    "axes.facecolor": "black",
-    "axes.edgecolor": "dimgray",
-    "axes.labelcolor": "darkgray",
-    "xtick.color": "darkgray",
-    "ytick.color": "darkgray",
-    "grid.color": "gray",
-    "figure.facecolor": "black",
-    "figure.edgecolor": "black",
-    "savefig.facecolor": "black",
-    "savefig.edgecolor": "black"})
+# plt.rcParams.update({
+#     "lines.color": "dimgray",
+#     "patch.edgecolor": "black",
+#     "text.color": "lightgray",
+#     "axes.facecolor": "black",
+#     "axes.edgecolor": "dimgray",
+#     "axes.labelcolor": "darkgray",
+#     "xtick.color": "darkgray",
+#     "ytick.color": "darkgray",
+#     "grid.color": "gray",
+#     "figure.facecolor": "black",
+#     "figure.edgecolor": "black",
+#     "savefig.facecolor": "black",
+#     "savefig.edgecolor": "black"})
 
 
 earth_radius = 6378.0 # km
@@ -55,6 +57,22 @@ def circle(r):
     return circle_arr
 
 
+def air_density_ratio(r):
+    R = 8.314
+    g = 9.81
+    M = 0.029
+    B = 0.0065
+    T_o = 288.16
+
+    H = (R*(T_o - (B*r)))/(M*g)
+
+    rho_o = 0.01569659023
+    alt = earth_radius - r
+
+    ratio = math.exp(alt/H)
+    return ratio
+
+
 def tle_cleanup(tle):
     """
     Takes the two line string TLE and converts it to a list containing the data from the TLE.
@@ -71,6 +89,8 @@ def tle_cleanup(tle):
     output
         ['1', '25544U', '98067A', '21330.52589841', '.00021613', '00000-0', '40355-3', '0', '9994', '2', '25544', '51.6433', '260.0308', '0004438', '278.8265', '247.0955', '15.48696306313759']
     """
+    if len(tle) == 0:
+        raise ValueError('Invalid query. Check if the satellite ID is correct and/or try a different date time range.')
     tle = tle.split('\n')
     l1 = tle[0].split(' ')
     while '' in l1:
@@ -79,10 +99,14 @@ def tle_cleanup(tle):
     while '' in l2:
         l2.remove('')
     tle = l1 + l2
+
+    if len(tle) > 17:
+        tle[2] = tle[2] + tle[3]
+        tle = tle[0:3] + tle[4:]
     return tle
 
 
-def diffy_q(t, y, mu):
+def diffy_q(t, y, mu, bstar):
     # unpacking the elements in state
     rx, ry, rz, vx, vy, vz = y
     r = np.array([rx, ry, rz])
@@ -99,13 +123,14 @@ def diffy_q(t, y, mu):
     ry_J2 = r_J2 * (r[1] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 1)
     rz_J2 = r_J2 * (r[2] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 3)
 
-    ax += rx_J2
-    ay += ry_J2
-    az += rz_J2
-
     # atmospheric drag
-    
+    drag_x = air_density_ratio(norm_r) * bstar / earth_radius * (vx ** 2)
+    drag_y = air_density_ratio(norm_r) * bstar / earth_radius * (vy ** 2)
+    drag_z = air_density_ratio(norm_r) * bstar / earth_radius * (vz ** 2)
 
+    ax += rx_J2 + drag_x
+    ay += ry_J2 + drag_y
+    az += rz_J2 + drag_z
 
     return [vx, vy, vz, ax, ay, az]
 
@@ -118,38 +143,38 @@ if __name__ == '__main__':
     password = contents[1]
 
     st = SpaceTrackClient(user, password)
-    drange = op.inclusive_range(dt.datetime(2020, 11, 26, 12),  dt.datetime(2020, 11, 27, 12))
-    drange_next = op.inclusive_range(dt.datetime(2020, 11, 28, 12),  dt.datetime(2020, 11, 29, 12))
-    iss_tle = st.tle(norad_cat_id=[25544], epoch=drange, limit=1,  format='tle')
-    iss_next_tle = st.tle(norad_cat_id=[25544], epoch=drange_next, limit=1,  format='tle')
-    print(iss_tle)
-    print(iss_next_tle)
-    iss_tle = tle_cleanup(iss_tle)
-    iss_next_tle = tle_cleanup(iss_next_tle)
-    print(iss_tle)
+    sat_cat_id = 25544
+    drange = op.inclusive_range(dt.datetime(2021, 10, 12),  dt.datetime(2021, 10, 13))
+    drange_next = op.inclusive_range(dt.datetime(2021, 10, 14),  dt.datetime(2021, 10, 15))
+    sat_tle = st.tle(norad_cat_id=[sat_cat_id], epoch=drange, limit=1,  format='tle')
+    sat_next_tle = st.tle(norad_cat_id=[sat_cat_id], epoch=drange_next, limit=1,  format='tle')
+
+    sat_tle = tle_cleanup(sat_tle)
+    sat_next_tle = tle_cleanup(sat_next_tle)
+    print(sat_tle)
+    print(sat_next_tle)
 
 
     """Space-Track data"""
     # create TLE object and create arrays for plotting
-    iss = TLE(iss_tle)
-    iss_path = iss.orbit
-    current_pos = iss.pos_arr
+    sat = TLE(sat_tle)
+    sat_path = sat.orbit
+    current_pos = sat.pos_arr
 
-    iss_next = TLE(iss_next_tle)
-    iss_next_path = iss_next.orbit
-    next_pos = iss_next.pos_arr
+    sat_next = TLE(sat_next_tle)
+    sat_next_path = sat_next.orbit
+    next_pos = sat_next.pos_arr
 
     equator = circle(earth_radius)
 
 
     """Numerical data"""
     # intial position and velocity vectors
-    r0 = [iss.pos_arr[0][0], iss.pos_arr[1][0], iss.pos_arr[2][0]]
-    v0 = [iss.vel_arr[0][0], iss.vel_arr[1][0], iss.vel_arr[2][0]]
+    r0 = [sat.pos_arr[0][0], sat.pos_arr[1][0], sat.pos_arr[2][0]]
+    v0 = [sat.vel_arr[0][0], sat.vel_arr[1][0], sat.vel_arr[2][0]]
 
     # time span
-    d_epoch = iss_next.epoch - iss.epoch
-    print(str(d_epoch) + ' days')
+    d_epoch = sat_next.epoch - sat.epoch
     tspan = int(d_epoch)*24*60*60
 
     # time step
@@ -157,6 +182,7 @@ if __name__ == '__main__':
 
     # total number of steps
     n_steps = int(np.ceil(tspan/dt))
+
 
     # intialize arrays
     ys = np.zeros((n_steps, 6))
@@ -169,9 +195,9 @@ if __name__ == '__main__':
 
     # intialize solver
     solver = ode(diffy_q)
-    solver.set_integrator('lsoda')
+    solver.set_integrator('dopri5')
     solver.set_initial_value(y0, 0)
-    solver.set_f_params(earth_mu)
+    solver.set_f_params(earth_mu, sat.bstar)
 
     # propagate orbit
     while solver.successful() and step < n_steps:
@@ -189,12 +215,13 @@ if __name__ == '__main__':
     ax = Axes3D(fig, box_aspect=(1, 1, .85))
 
     # plot orbit of object and equator
-    plt.plot(iss_path[0], iss_path[1], iss_path[2], color='deepskyblue', linestyle='solid', linewidth=2,  label='ISS')
-    ax.plot(iss_next_path[0], iss_next_path[1], iss_next_path[2], color='hotpink', linestyle='solid', linewidth=2, label='ISS 48 hours')
-    plt.plot(current_pos[0], current_pos[1], current_pos[2], marker='o', markerfacecolor='deepskyblue', markeredgecolor='deepskyblue', label='ISS current position')
+    plt.plot(sat_path[0], sat_path[1], sat_path[2], color='deepskyblue', linestyle='solid', linewidth=2,  label='sat')
+    ax.plot(sat_next_path[0], sat_next_path[1], sat_next_path[2], color='hotpink', linestyle='solid', linewidth=2, label='sat {0:.2f} hours'.format(d_epoch*24))
+    plt.plot(current_pos[0], current_pos[1], current_pos[2], marker='o', markerfacecolor='deepskyblue', markeredgecolor='deepskyblue', label='sat current position')
     ax.plot(rs[:, 0], rs[:, 1], rs[:, 2], color='blueviolet', linestyle='solid', alpha=0.5, label='Numerically calculated trajectory')
+    #ax.plot(rs[1650:, 0], rs[1650:, 1], rs[1650:, 2], color='blueviolet', linestyle='solid', alpha=0.5, label='Numerically calculated trajectory')
     plt.plot(equator[0], equator[1], equator[2], color='limegreen', linestyle='dashed', label='Equator')
-    ax.quiver(iss.pos_arr[0], iss.pos_arr[1], iss.pos_arr[2],  iss.vel_arr[0]*300,  iss.vel_arr[1]*300, iss.vel_arr[2]*300, color='deepskyblue')
+    ax.quiver(sat.pos_arr[0], sat.pos_arr[1], sat.pos_arr[2],  sat.vel_arr[0]*300,  sat.vel_arr[1]*300, sat.vel_arr[2]*300, color='deepskyblue')
     plt.legend()
 
     # plotting Earth
