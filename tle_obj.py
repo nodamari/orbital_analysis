@@ -184,9 +184,9 @@ class TLE:
             r = -r
         t = np.deg2rad(self.theta)
 
-
-        x = r*np.cos(t)
-        y = r*np.sin(t)
+        d = np.sqrt(r**2 + self.c**2 - (2*r*self.c*np.cos(np.deg2rad(360-self.theta))))
+        x = d*np.cos(t)
+        y = d*np.sin(t)
 
         pos_arr = np.array(([x], [y], [0]))
 
@@ -232,6 +232,6 @@ class TLE:
         #     d_arr = -d_arr + np.vstack((self.orbit[0, min_idx + 1], self.orbit[1, min_idx + 1], self.orbit[2, min_idx + 1]))
         # vel_unit = d_arr / np.linalg.norm(d_arr)
         # self.vel_arr = vel_unit * vel_scalar
-        self.vel_arr = vel_arr # rotation313(vel_arr, self.right_ascension, self.inclination, self.arg_perigee)
+        self.vel_arr = vel_arr #rotation313(vel_arr, self.right_ascension, self.inclination, self.arg_perigee)
         return self.vel_arr
 
