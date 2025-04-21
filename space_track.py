@@ -6,6 +6,8 @@ second line.
 """
 import datetime as dt
 import math
+import pickle
+
 from spacetrack import SpaceTrackClient
 import spacetrack.operators as op
 from tle_obj import TLE
@@ -32,7 +34,7 @@ from mpl_toolkits.mplot3d.axes3d import Axes3D
 
 
 earth_radius = 6378.0 # km
-earth_mu = 398600.0 # km^3 / s^2
+earth_mu = 398600.4418 # km^3 / s^2
 J2 = 1.08262668e-3
 
 
@@ -72,6 +74,19 @@ def air_density_ratio(r):
     ratio = math.exp(alt/H)
     return ratio
 
+def angle(v1, v2):
+    v1 = np.ndarray.flatten(v1)
+    v2 = np.ndarray.flatten(v2)
+    cos_theta = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    cos_theta = np.clip(cos_theta, -1, 1)
+    # unit_v1 = v1 / np.linalg.norm(v1)
+    # unit_v2 = v2 / np.linalg.norm(v2)
+    # dot_product = np.dot(unit_v1, unit_v2)
+    angle_rad = np.arccos(cos_theta)
+    angle_deg = np.rad2deg(angle_rad)
+    return angle_deg
+
+
 
 def tle_cleanup(tle):
     """
@@ -89,72 +104,102 @@ def tle_cleanup(tle):
     output
         ['1', '25544U', '98067A', '21330.52589841', '.00021613', '00000-0', '40355-3', '0', '9994', '2', '25544', '51.6433', '260.0308', '0004438', '278.8265', '247.0955', '15.48696306313759']
     """
+
+
     if len(tle) == 0:
         raise ValueError('Invalid query. Check if the satellite ID is correct and/or try a different date time range.')
-    tle = tle.split('\n')
-    l1 = tle[0].split(' ')
-    while '' in l1:
-        l1.remove('')
-    l2 = tle[1].split(' ')
-    while '' in l2:
-        l2.remove('')
-    tle = l1 + l2
 
-    if len(tle) > 17:
-        tle[2] = tle[2] + tle[3]
-        tle = tle[0:3] + tle[4:]
+    tle = tle.split()
+
+    # if some of the elements are concatenated
+    # usually the checksum number is combined with the last element in each line
+    if len(tle) < 20:
+      second_line_idx = tle.index('2') # find the list index of the '2' line num
+      element_checksum_1_idx = second_line_idx -1
+      element_num = tle[element_checksum_1_idx][0:-1]
+      checksum_1 = tle[element_checksum_1_idx][-1]
+
+      rev_epoch = tle[-1][0:-1]
+      checksum_2 = tle[-1][-1]
+
+      tle[element_checksum_1_idx: element_checksum_1_idx+1] = element_num, checksum_1
+      tle[len(tle)-1 : len(tle)] = rev_epoch, checksum_2
+
     return tle
 
+def fun(S, t, mu):
+    rx, ry, rz, vx, vy, vz = S
 
-def diffy_q(t, y, mu, bstar):
-    # unpacking the elements in state
-    rx, ry, rz, vx, vy, vz = y
     r = np.array([rx, ry, rz])
 
     # norm of radius vector
     norm_r = np.linalg.norm(r)
 
     # Earth's gravitational acceleration
-    ax, ay, az = -r*mu/norm_r**3
+    ax, ay, az = -(r * mu) / (norm_r ** 3)
+
+    return [vx, vy, vz, ax, ay, az]
+
+
+def diffy_q(t, y, mu, bstar):
+    # unpacking the elements in state
+    rx, ry, rz, vx, vy, vz = y
+    r = np.array([rx, ry, rz])
+    v = np.array([vx, vy, vz])
+    # norm of radius vector
+    norm_r = np.linalg.norm(r)
+
+    # Earth's gravitational acceleration
+    ax, ay, az = -(r*mu)/(norm_r**3)
 
     # J2 correction
     r_J2 = -(3 / 2) * J2 * (earth_mu / norm_r ** 2) * ((earth_radius / norm_r) ** 2)
-    rx_J2 = r_J2 * (r[0] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 1)
-    ry_J2 = r_J2 * (r[1] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 1)
-    rz_J2 = r_J2 * (r[2] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 3)
+    rx_J2 = r_J2 * (r[0] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 1) * 0.0001
+    ry_J2 = r_J2 * (r[1] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 1) * 0.0001
+    rz_J2 = r_J2 * (r[2] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 3) * 0.0001
+
 
     # atmospheric drag
     drag_x = air_density_ratio(norm_r) * bstar / earth_radius * (vx ** 2)
     drag_y = air_density_ratio(norm_r) * bstar / earth_radius * (vy ** 2)
     drag_z = air_density_ratio(norm_r) * bstar / earth_radius * (vz ** 2)
 
-    ax += rx_J2 + drag_x
-    ay += ry_J2 + drag_y
-    az += rz_J2 + drag_z
+    #ax += rx_J2 #+ drag_x
+    #ay += ry_J2 #+ drag_y
+    #az += rz_J2 #+ drag_z
 
+    # ax += drag_x
+    # ay += drag_y
+    # az += drag_z
     return [vx, vy, vz, ax, ay, az]
 
 
 if __name__ == '__main__':
-    # get username and password from userpass.txt file
+    #get username and password from userpass.txt file
     with open('userpass.txt') as f:
         contents = f.readlines()
     user = contents[0].rstrip('\n')
     password = contents[1]
 
     st = SpaceTrackClient(user, password)
-    sat_cat_id = 25544
-    drange = op.inclusive_range(dt.datetime(2021, 10, 12),  dt.datetime(2021, 10, 13))
-    drange_next = op.inclusive_range(dt.datetime(2021, 10, 14),  dt.datetime(2021, 10, 15))
+    sat_cat_id = 44952# 25544 # ISS
+
+    drange = op.inclusive_range(dt.datetime(2025, 4, 12),  dt.datetime(2025, 4, 13))
+    #drange_next = op.inclusive_range(dt.datetime(2021, 10, 14), dt.datetime(2021, 10, 15))
+
+    drange_next = op.inclusive_range(dt.datetime(2025, 4, 14),  dt.datetime(2025, 4, 15))
     sat_tle = st.tle(norad_cat_id=[sat_cat_id], epoch=drange, limit=1,  format='tle')
     sat_next_tle = st.tle(norad_cat_id=[sat_cat_id], epoch=drange_next, limit=1,  format='tle')
 
-    sat_tle = tle_cleanup(sat_tle)
+    sat_tle =  tle_cleanup(sat_tle)
     sat_next_tle = tle_cleanup(sat_next_tle)
     print(sat_tle)
     print(sat_next_tle)
 
 
+    # with open("sat.pkl", "rb") as inp:
+    #     sat = pickle.load(inp)
+    #     sat_next = pickle.load(inp)
     """Space-Track data"""
     # create TLE object and create arrays for plotting
     sat = TLE(sat_tle)
@@ -167,6 +212,10 @@ if __name__ == '__main__':
 
     equator = circle(earth_radius)
 
+    # with open("sat.pkl", "wb") as outf:
+    #     pickle.dump(sat, outf)
+    #     pickle.dump(sat_next, outf)
+
 
     """Numerical data"""
     # intial position and velocity vectors
@@ -178,10 +227,10 @@ if __name__ == '__main__':
     tspan = int(d_epoch)*24*60*60
 
     # time step
-    dt = 50
+    dt = 50 # [sec]
 
     # total number of steps
-    n_steps = int(np.ceil(tspan/dt))
+    n_steps = int(np.ceil(tspan/dt))+1
 
 
     # intialize arrays
@@ -209,7 +258,15 @@ if __name__ == '__main__':
     vs = ys[:, 3:]
 
 
-    """Plotting"""
+    orbital_elements_converted = OE(rs, vs)
+    print()
+
+    plt.plot(ts, np.sqrt((rs[:, 0]**2) + (rs[:, 1]**2) + (rs[:, 2]**2)))
+    plt.plot(ts, np.sqrt((vs[:, 0]**2) + (vs[:, 1]**2) + (vs[:, 2]**2)) *1000)
+    plt.show()
+    """
+    # PLOTTING #
+    
     # initialize the figure
     fig = plt.figure()
     ax = Axes3D(fig, box_aspect=(1, 1, .85))
@@ -238,3 +295,4 @@ if __name__ == '__main__':
     ax.plot_surface(_x,_y,_z, color='honeydew', label='Earth', zorder=1, alpha=0.3)
 
     plt.show()
+    """

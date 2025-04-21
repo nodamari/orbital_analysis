@@ -2,6 +2,17 @@
 
 import numpy as np
 
+def angle(v1, v2):
+    v1 = np.ndarray.flatten(v1)
+    v2 = np.ndarray.flatten(v2)
+    cos_theta = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    cos_theta = np.clip(cos_theta, -1, 1)
+    # unit_v1 = v1 / np.linalg.norm(v1)
+    # unit_v2 = v2 / np.linalg.norm(v2)
+    # dot_product = np.dot(unit_v1, unit_v2)
+    angle_rad = np.arccos(cos_theta)
+    angle_deg = np.rad2deg(angle_rad)
+    return angle_deg
 
 class OE:
     def __init__(self, pos, vel):
@@ -40,14 +51,19 @@ class OE:
 
     def eccentricity(self):
         length = np.shape(self.pos)[0]
-        earth_mu = 398600.0  # km^3 / s^2
+        earth_mu = 398600.4418  # km^3 / s^2
         # e1 = np.cross(self.vel, self.h) / earth_mu
         e1 = np.zeros((length, 3))
         e2 = np.zeros((length, 3))
+
         for i in range(length):
+            true_h = np.cross(self.pos[i], self.vel[i])
+
             e1[i] = np.cross(self.vel[i], self.h[i]) / earth_mu
             e2[i] = self.pos[i] / np.linalg.norm(self.pos[i])
-        self.e_vec = e1 - e2
+        e_vec = e1 - e2
+        #e_vec[:, 1] = 0
+        self.e_vec = e_vec
         self.e = np.linalg.norm(self.e_vec, axis=1)
         return self.e, self.e_vec
 

@@ -2,7 +2,7 @@ from scipy.optimize import fsolve
 import numpy as np
 import math
 
-earth_mu = 398600.0 # km^3 / s^2
+earth_mu = 398600.4418 # km^3 / s^2
 
 
 def eccentric_anomaly(E, M, eccentricity):
@@ -11,13 +11,16 @@ def eccentric_anomaly(E, M, eccentricity):
 
 
 def angle(v1, v2):
-    v1 = v1.T
-    v2 = v2.T
-    unit_v1 = v1 / np.linalg.norm(v1)
-    unit_v2 = v2 / np.linalg.norm(v2)
-    dot_product = np.dot(unit_v1, unit_v2)
-
-    return np.arccos(dot_product)
+    v1 = np.ndarray.flatten(v1)
+    v2 = np.ndarray.flatten(v2)
+    cos_theta = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    cos_theta = np.clip(cos_theta, -1, 1)
+    # unit_v1 = v1 / np.linalg.norm(v1)
+    # unit_v2 = v2 / np.linalg.norm(v2)
+    # dot_product = np.dot(unit_v1, unit_v2)
+    angle_rad = np.arccos(cos_theta)
+    angle_deg = np.rad2deg(angle_rad)
+    return angle_deg
 
 
 def distance(r, t, a, b):
@@ -48,9 +51,29 @@ def ellipse(a, b):
 
 
 def rotation313(arr, s, t, p):
-    s = np.deg2rad(s)
-    t = np.deg2rad(t)
-    p = np.deg2rad(p)
+    s = np.deg2rad(s) # psi , RAAN
+    t = np.deg2rad(t) # theta, anomaly
+    p = np.deg2rad(p) # phi, arg peri
+
+    cos_s = np.cos(s)
+    sin_s = np.sin(s)
+    cos_t = np.cos(t)
+    sin_t = np.sin(t)
+    cos_p = np.cos(p)
+    sin_p = np.sin(p)
+
+    mat_1 = (cos_s * cos_p) - (sin_s * sin_p * cos_t)
+    mat_2 = (cos_s * sin_p) + (sin_s * cos_t * cos_p)
+    mat_3 = sin_s * sin_t
+    mat_4 = -(sin_s * cos_p) - (cos_s * sin_p* cos_t)
+    mat_5 = -(sin_s * sin_p) + (cos_s * cos_t * cos_p)
+    mat_6 = cos_s * sin_t
+    mat_7 = sin_t * sin_p
+    mat_8 = -sin_t * cos_p
+    mat_9 = cos_t
+
+    rot_arr = np.array(([mat_1, mat_2, mat_3], [mat_4, mat_5, mat_6], [mat_7, mat_8, mat_9]))
+
     # body 3: right ascension of the ascending node
     z1_rot = np.array(([np.cos(s), np.sin(s), 0], [-np.sin(s), np.cos(s), 0], [0, 0, 1]))
     # body 1: inclination
@@ -61,7 +84,8 @@ def rotation313(arr, s, t, p):
     rot1 = np.matmul(z1_rot, arr)
     rot2 = np.matmul(x_rot, rot1)
     rot3 = np.matmul(z2_rot, rot2)
-    return rot3
+
+    return np.matmul(rot_arr, arr)
 
 
 class TLE:
@@ -69,12 +93,12 @@ class TLE:
         self.norad_cat_id = input[1]
         self.epoch = float(input[3])
         self.bstar = float(input[4])
-        self.inclination = float(input[11])
-        self.right_ascension = float(input[12])
-        self.eccentricity = float('0.' + input[13])
-        self.arg_perigee = float(input[14])
-        self.mean_anomaly = float(input[15])
-        self.mean_motion = float(input[16])
+        self.inclination = float(input[12])
+        self.right_ascension = float(input[13])
+        self.eccentricity = float('0.' + input[14])
+        self.arg_perigee = float(input[15])
+        self.mean_anomaly = float(input[16])
+        self.mean_motion = float(input[17])
         self.a = self.semi_major_axis()
         self.theta = self.true_anomaly()
         self.apogee = self.apogee_perigee()[0]
@@ -86,6 +110,7 @@ class TLE:
         self.h = self.specific_energy()[1]
         self.pos_arr = self.object_pos()
         self.vel_arr = self.object_vel()
+        print()
 
     def true_anomaly(self):  # true anomaly in degrees
         E = fsolve(eccentric_anomaly, 2, args=(self.mean_anomaly, self.eccentricity))
@@ -144,7 +169,7 @@ class TLE:
             self.h[0][0] = 0
             self.h[1][0] = 0
             self.h[2][0] = h_scalar
-        self.h = rotation313(self.h, self.right_ascension, self.inclination, self.arg_perigee)
+        #self.h = rotation313(self.h, self.right_ascension, self.inclination, self.arg_perigee)
         return self.eta, self.h
 
     def object_pos(self):
@@ -154,36 +179,59 @@ class TLE:
         """
         self.pos_arr = np.zeros((3, 1))
         r = fsolve(distance, -self.a, args=(self.theta, self.a, self.b))
+        r = r[0]  # take it out of the array
         if r < 0:
             r = -r
         t = np.deg2rad(self.theta)
+
+
         x = r*np.cos(t)
         y = r*np.sin(t)
 
-        self.pos_arr[0][0] = x
-        self.pos_arr[1][0] = y
-        self.pos_arr = rotation313(self.pos_arr, self.right_ascension, self.inclination, self.arg_perigee)
+        pos_arr = np.array(([x], [y], [0]))
+
+        #self.pos_arr[0][0] = x
+        #self.pos_arr[1][0] = y
+        #self.pos_arr = pos_arr
+        self.pos_arr = pos_arr # rotation313(pos_arr, self.right_ascension, self.inclination, self.arg_perigee)
         return self.pos_arr
 
     def object_vel(self):
-        pos_scalar = np.linalg.norm(self.pos_arr)
-        vel_scalar = np.sqrt(2*(self.eta + (earth_mu/pos_scalar)))
-        pos_mat = np.ones((3, np.shape(self.orbit)[1]))
-        pos_mat[0] *= self.pos_arr[0]
-        pos_mat[1] *= self.pos_arr[1]
-        pos_mat[2] *= self.pos_arr[2]
-        d_dist_mag = np.linalg.norm(self.orbit - pos_mat, axis=0)
-        min_idx = np.argmin(d_dist_mag)
-        d_arr = np.vstack((self.orbit[0,min_idx], self.orbit[1,min_idx], self.orbit[2,min_idx]))
-        if 90 <= self.inclination <= 180:
-            d_arr = d_arr - np.vstack((self.orbit[0,min_idx+1], self.orbit[1,min_idx+1], self.orbit[2,min_idx+1]))
-        else:
-            d_arr = -d_arr + np.vstack((self.orbit[0, min_idx + 1], self.orbit[1, min_idx + 1], self.orbit[2, min_idx + 1]))
-        vel_unit = d_arr / np.linalg.norm(d_arr)
-        self.vel_arr = vel_unit * vel_scalar
+        pos_scalar = np.linalg.norm(self.pos_arr) # distance from Earth center to object [km]
+        vel_scalar = np.sqrt(2 * (self.eta + (earth_mu / pos_scalar)))  # [km/s]
 
+        vel_scalar = np.sqrt(earth_mu * ((2/pos_scalar) - (1/self.a)))
+        x_dot = (earth_mu / np.linalg.norm(self.h)) * -np.sin(np.deg2rad(self.theta)) #- pos_scalar*np.sin(np.deg2rad(self.theta))
+        y_dot = (earth_mu / np.linalg.norm(self.h)) * (self.eccentricity + np.cos(np.deg2rad(self.theta))) # pos_scalar * np.cos(np.deg2rad(self.theta))
+        x_dot_weird = (earth_mu / np.linalg.norm(self.h)) * -np.sin(np.deg2rad(self.theta))
+        y_dot_weird = (earth_mu / np.linalg.norm(self.h)) * (0 + np.cos(np.deg2rad(self.theta)))
+
+        x_dot_1 = - pos_scalar*np.sin(np.deg2rad(self.theta)) / np.linalg.norm(- pos_scalar*np.sin(np.deg2rad(self.theta))) * vel_scalar  # deriv of rcos(theta)
+        y_dot_1 = pos_scalar * np.cos(np.deg2rad(self.theta)) / np.linalg.norm(pos_scalar * np.cos(np.deg2rad(self.theta))) * vel_scalar # deriv of rcos(theta)
+
+        x_dot_2 = - self.a*np.sin(np.deg2rad(self.theta)) / np.linalg.norm(- self.a*np.sin(np.deg2rad(self.theta))) * vel_scalar
+        y_dot_2 = self.b*np.cos(np.deg2rad(self.theta)) / np.linalg.norm(self.b*np.cos(np.deg2rad(self.theta))) * vel_scalar
+        vel_arr = np.array(([x_dot], [y_dot], [0]))
+
+        unit_vel_arr = vel_arr / np.linalg.norm(vel_arr)
+
+
+        vel_arr = vel_scalar * unit_vel_arr
+
+        # pos_mat = np.ones((3, np.shape(self.orbit)[1]))
+        # pos_mat[0] *= self.pos_arr[0]
+        # pos_mat[1] *= self.pos_arr[1]
+        # pos_mat[2] *= self.pos_arr[2]
+        # d_dist_mag = np.linalg.norm(self.orbit - pos_mat, axis=0)
+        # #min_idx = np.argmin(d_dist_mag)
+        # min_idx = int((self.true_anomaly() / 360) * (np.shape(self.orbit)[1]))
+        # d_arr = np.vstack((self.orbit[0,min_idx], self.orbit[1,min_idx], self.orbit[2,min_idx]))
+        # if 90 <= self.inclination <= 180:
+        #     d_arr = d_arr - np.vstack((self.orbit[0,min_idx+1], self.orbit[1,min_idx+1], self.orbit[2,min_idx+1]))
+        # else:
+        #     d_arr = -d_arr + np.vstack((self.orbit[0, min_idx + 1], self.orbit[1, min_idx + 1], self.orbit[2, min_idx + 1]))
+        # vel_unit = d_arr / np.linalg.norm(d_arr)
+        # self.vel_arr = vel_unit * vel_scalar
+        self.vel_arr = vel_arr # rotation313(vel_arr, self.right_ascension, self.inclination, self.arg_perigee)
         return self.vel_arr
-
-
-
 
