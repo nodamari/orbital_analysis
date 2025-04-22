@@ -52,7 +52,7 @@ def ellipse(a, b):
 
 def rotation313(arr, s, t, p):
     s = np.deg2rad(s) # psi , RAAN
-    t = np.deg2rad(t) # theta, anomaly
+    t = np.deg2rad(t) # theta, inclination
     p = np.deg2rad(p) # phi, arg peri
 
     cos_s = np.cos(s)
@@ -62,14 +62,25 @@ def rotation313(arr, s, t, p):
     cos_p = np.cos(p)
     sin_p = np.sin(p)
 
+    # mat_1 = (cos_s * cos_p) - (sin_s * sin_p * cos_t)
+    # mat_2 = (cos_s * sin_p) + (sin_s * cos_t * cos_p)
+    # mat_3 = sin_s * sin_t
+    # mat_4 = -(sin_s * cos_p) - (cos_s * sin_p* cos_t)
+    # mat_5 = -(sin_s * sin_p) + (cos_s * cos_t * cos_p)
+    # mat_6 = cos_s * sin_t
+    # mat_7 = sin_t * sin_p
+    # mat_8 = -sin_t * cos_p
+    # mat_9 = cos_t
+
+
     mat_1 = (cos_s * cos_p) - (sin_s * sin_p * cos_t)
-    mat_2 = (cos_s * sin_p) + (sin_s * cos_t * cos_p)
+    mat_2 = -(cos_s * sin_p) - (sin_s * cos_t * cos_p)
     mat_3 = sin_s * sin_t
-    mat_4 = -(sin_s * cos_p) - (cos_s * sin_p* cos_t)
+    mat_4 = (sin_s * cos_p) + (cos_s * sin_p* cos_t)
     mat_5 = -(sin_s * sin_p) + (cos_s * cos_t * cos_p)
-    mat_6 = cos_s * sin_t
+    mat_6 = -cos_s * sin_t
     mat_7 = sin_t * sin_p
-    mat_8 = -sin_t * cos_p
+    mat_8 = sin_t * cos_p
     mat_9 = cos_t
 
     rot_arr = np.array(([mat_1, mat_2, mat_3], [mat_4, mat_5, mat_6], [mat_7, mat_8, mat_9]))
@@ -111,6 +122,10 @@ class TLE:
         self.pos_arr = self.object_pos()
         self.vel_arr = self.object_vel()
         print()
+
+    def year(self):
+        return int("20" + str(self.epoch)[0:2])
+
 
     def true_anomaly(self):  # true anomaly in degrees
         E = fsolve(eccentric_anomaly, 2, args=(self.mean_anomaly, self.eccentricity))
@@ -169,7 +184,7 @@ class TLE:
             self.h[0][0] = 0
             self.h[1][0] = 0
             self.h[2][0] = h_scalar
-        #self.h = rotation313(self.h, self.right_ascension, self.inclination, self.arg_perigee)
+        self.h = rotation313(self.h, self.right_ascension, self.inclination, self.arg_perigee)
         return self.eta, self.h
 
     def object_pos(self):
@@ -193,7 +208,7 @@ class TLE:
         #self.pos_arr[0][0] = x
         #self.pos_arr[1][0] = y
         #self.pos_arr = pos_arr
-        self.pos_arr = pos_arr # rotation313(pos_arr, self.right_ascension, self.inclination, self.arg_perigee)
+        self.pos_arr = rotation313(pos_arr, self.right_ascension, self.inclination, self.arg_perigee)
         return self.pos_arr
 
     def object_vel(self):
@@ -232,6 +247,5 @@ class TLE:
         #     d_arr = -d_arr + np.vstack((self.orbit[0, min_idx + 1], self.orbit[1, min_idx + 1], self.orbit[2, min_idx + 1]))
         # vel_unit = d_arr / np.linalg.norm(d_arr)
         # self.vel_arr = vel_unit * vel_scalar
-        self.vel_arr = vel_arr #rotation313(vel_arr, self.right_ascension, self.inclination, self.arg_perigee)
+        self.vel_arr = rotation313(vel_arr, self.right_ascension, self.inclination, self.arg_perigee)
         return self.vel_arr
-

@@ -4,7 +4,7 @@ tle_obj.py is a class object file.
 userpass.txt is a text file containing the username for space-track.org in the first line and the password in the
 second line.
 """
-import datetime as dt
+import datetime
 import math
 import pickle
 
@@ -16,6 +16,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import ode
 from mpl_toolkits.mplot3d.axes3d import Axes3D
+
 #plt.style.use('dark_background')
 # plt.rcParams.update({
 #     "lines.color": "dimgray",
@@ -154,9 +155,21 @@ def diffy_q(t, y, mu, bstar):
 
     # J2 correction
     r_J2 = -(3 / 2) * J2 * (earth_mu / norm_r ** 2) * ((earth_radius / norm_r) ** 2)
-    rx_J2 = r_J2 * (r[0] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 1) * 0.0001
-    ry_J2 = r_J2 * (r[1] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 1) * 0.0001
-    rz_J2 = r_J2 * (r[2] / norm_r) * ((5 * ((r[2] / norm_r) ** 2)) - 3) * 0.0001
+    ax_J2 = r_J2 * (r[0] / norm_r) * ((-5 * ((r[2] / norm_r) ** 2)) + 1)
+    ay_J2 = r_J2 * (r[1] / norm_r) * ((-5 * ((r[2] / norm_r) ** 2)) + 1)
+    az_J2 = r_J2 * (r[2] / norm_r) * ((-5 * ((r[2] / norm_r) ** 2)) + 3)
+
+
+    j2_comp = (3/2) * J2 * ((earth_radius/norm_r) **2)
+    x_comp = - (earth_mu * r[0]) / (norm_r**3)
+    y_comp = - (earth_mu * r[1]) / (norm_r ** 3)
+    z_comp = - (earth_mu * r[2]) / (norm_r ** 3)
+    xy = 1 - 5* ((r[2]**2)/(norm_r**2))
+    z = 3 - 5* ((r[2]**2)/(norm_r**2))
+
+    ax_J2 = x_comp * (1 + (j2_comp * xy))
+    ay_J2 = y_comp * (1 + (j2_comp * xy))
+    az_J2 = z_comp * (1 + (j2_comp * z))
 
 
     # atmospheric drag
@@ -164,14 +177,41 @@ def diffy_q(t, y, mu, bstar):
     drag_y = air_density_ratio(norm_r) * bstar / earth_radius * (vy ** 2)
     drag_z = air_density_ratio(norm_r) * bstar / earth_radius * (vz ** 2)
 
-    #ax += rx_J2 #+ drag_x
-    #ay += ry_J2 #+ drag_y
-    #az += rz_J2 #+ drag_z
+    #ax += ax_J2 #+ drag_x
+    #ay += ay_J2 #+ drag_y
+    #az += az_J2 #+ drag_z
 
     # ax += drag_x
     # ay += drag_y
     # az += drag_z
     return [vx, vy, vz, ax, ay, az]
+
+def read_multiple_tles(tles):
+    tle_list = []
+    line_broken = tles.split("\n")
+    for i in range(len(line_broken)):
+        if i % 2 ==1:
+
+            first_line = line_broken[i-1]
+            second_line = line_broken[i]
+
+            first_line = first_line.split()
+            if len(first_line) < 10:
+              first_checksum = first_line[-1][-1]
+              element_num = first_line[-1][0:-1]
+              first_line[len(first_line)-1: len(first_line)] = element_num, first_checksum
+
+            second_line = second_line.split()
+
+            if len(second_line) < 9:
+              rev_epoch = second_line[-1][0:-1]
+              checksum_2 = second_line[-1][-1]
+              second_line[len(second_line) - 1: len(second_line)] = rev_epoch, checksum_2
+
+            first_line.extend(second_line)
+            tle_list.append(first_line)
+
+    return tle_list
 
 
 if __name__ == '__main__':
@@ -183,23 +223,21 @@ if __name__ == '__main__':
 
     st = SpaceTrackClient(user, password)
     sat_cat_id = 44952# 25544 # ISS
+    sat_cat_id = 44952# 25544 # ISS
 
-    drange = op.inclusive_range(dt.datetime(2025, 4, 12),  dt.datetime(2025, 4, 13))
+    drange = op.inclusive_range(datetime.datetime(2025, 4, 15),  datetime.datetime(2025, 4, 16))
     #drange_next = op.inclusive_range(dt.datetime(2021, 10, 14), dt.datetime(2021, 10, 15))
 
-    drange_next = op.inclusive_range(dt.datetime(2025, 4, 14),  dt.datetime(2025, 4, 15))
+    drange_next = op.inclusive_range(datetime.datetime(2025, 4, 17),  datetime.datetime(2025, 4, 18))
     sat_tle = st.tle(norad_cat_id=[sat_cat_id], epoch=drange, limit=1,  format='tle')
     sat_next_tle = st.tle(norad_cat_id=[sat_cat_id], epoch=drange_next, limit=1,  format='tle')
 
     sat_tle =  tle_cleanup(sat_tle)
     sat_next_tle = tle_cleanup(sat_next_tle)
     print(sat_tle)
-    print(sat_next_tle)
 
 
-    # with open("sat.pkl", "rb") as inp:
-    #     sat = pickle.load(inp)
-    #     sat_next = pickle.load(inp)
+
     """Space-Track data"""
     # create TLE object and create arrays for plotting
     sat = TLE(sat_tle)
@@ -210,12 +248,56 @@ if __name__ == '__main__':
     sat_next_path = sat_next.orbit
     next_pos = sat_next.pos_arr
 
-    equator = circle(earth_radius)
+    # equator = circle(earth_radius)
 
-    # with open("sat.pkl", "wb") as outf:
-    #     pickle.dump(sat, outf)
-    #     pickle.dump(sat_next, outf)
+    # TLEs for verification
+    two_day  = op.inclusive_range(datetime.datetime(2025, 4, 15),  datetime.datetime(2025, 4, 17, 15))
+    two_day_tles = st.tle(epoch=two_day, format="tle", limit=12, norad_cat_id=sat_cat_id)
+    tle_list = read_multiple_tles(two_day_tles)
+    tle_dict = {}
 
+    first_epoch = -1
+    for tle in tle_list:
+        tle_object = TLE(tle)
+        tle_dict[tle_object.epoch] = {}
+        tle_dict[tle_object.epoch]["argument_perigee"] = tle_object.arg_perigee
+        tle_dict[tle_object.epoch]["eccentricity"] = tle_object.eccentricity
+        tle_dict[tle_object.epoch]["true_anomaly"] = tle_object.true_anomaly()
+        tle_dict[tle_object.epoch]["raan"] = tle_object.right_ascension
+        tle_dict[tle_object.epoch]["inclination"] = tle_object.inclination
+        tle_dict[tle_object.epoch]["pos_vec"] = tle_object.pos_arr
+        tle_dict[tle_object.epoch]["vel_vec"] = tle_object.vel_arr
+        tle_dict[tle_object.epoch]["distance"] = np.linalg.norm(tle_object.pos_arr)
+        tle_dict[tle_object.epoch]["speed"] = np.linalg.norm(tle_object.vel_arr)
+        tle_dict[tle_object.epoch]["h_vec"] = tle_object.h
+
+        year = int("20" + str(tle_object.epoch)[0:2])
+        days_into_year = tle_object.epoch % 1000
+        tle_dict[tle_object.epoch]["datetime_obj"] = datetime.datetime(year=year, month=1, day=1) + datetime.timedelta(days=days_into_year-1)
+
+        if len(tle_dict) == 1:
+            first_epoch = tle_dict[tle_object.epoch]["datetime_obj"]
+            tle_dict[tle_object.epoch]["relative_time"] = 0
+        else:
+            relative_epoch = tle_dict[tle_object.epoch]["datetime_obj"] - first_epoch
+            tle_dict[tle_object.epoch]["relative_time"] = (relative_epoch.days * 24) + ((relative_epoch.seconds + (relative_epoch.microseconds/1000000)) / 3600) # [hr]
+
+
+    relative_time_list = []
+    distance_list = []
+    speed_list = []
+    true_anomaly_list = []
+    raan_list = []
+    arg_perigee_list = []
+    inclination_list = []
+    for epoch, values in tle_dict.items():
+        relative_time_list.append(values["relative_time"])
+        distance_list.append(values["distance"])
+        speed_list.append(values["speed"])
+        true_anomaly_list.append(values["true_anomaly"])
+        raan_list.append(values["raan"])
+        arg_perigee_list.append(values["argument_perigee"])
+        inclination_list.append(values["inclination"])
 
     """Numerical data"""
     # intial position and velocity vectors
@@ -231,7 +313,6 @@ if __name__ == '__main__':
 
     # total number of steps
     n_steps = int(np.ceil(tspan/dt))+1
-
 
     # intialize arrays
     ys = np.zeros((n_steps, 6))
@@ -257,13 +338,69 @@ if __name__ == '__main__':
     rs = ys[:, :3]
     vs = ys[:, 3:]
 
-
     orbital_elements_converted = OE(rs, vs)
-    print()
 
-    plt.plot(ts, np.sqrt((rs[:, 0]**2) + (rs[:, 1]**2) + (rs[:, 2]**2)))
-    plt.plot(ts, np.sqrt((vs[:, 0]**2) + (vs[:, 1]**2) + (vs[:, 2]**2)) *1000)
-    plt.show()
+
+    # Plotting
+
+    # true anomaly
+    plt.figure(figsize=(9 , 6))
+    ts_hour = ts/3600
+    plt.plot(ts_hour, orbital_elements_converted.theta, alpha=1, label="Calculated Value")
+    plt.plot(relative_time_list, true_anomaly_list, linestyle="None", marker="*", label="Database Value")
+    plt.xlabel("Time [hours]")
+    plt.ylabel("True Anomaly [deg]")
+    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
+    plt.grid(linestyle="--")
+    plt.legend()
+    plt.savefig("true_anomaly.png", bbox_inches="tight", dpi=500)
+
+    # distance
+    plt.figure(figsize=(9 , 6))
+    plt.plot(ts_hour, np.sqrt((orbital_elements_converted.pos[:, 0]**2) + (orbital_elements_converted.pos[:, 1]**2) + (orbital_elements_converted.pos[:, 2]**2)), label="Calculated Value")
+    plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
+    plt.xlabel("Time [hours]")
+    plt.ylabel("Distance [km]")
+    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
+    plt.grid(linestyle="--")
+    plt.legend()
+    plt.savefig("distance.png", bbox_inches="tight", dpi=500)
+
+    # speed
+    plt.figure(figsize=(9 , 6))
+    plt.plot(ts_hour, np.sqrt((orbital_elements_converted.vel[:, 0]**2) + (orbital_elements_converted.vel[:, 1]**2) + (orbital_elements_converted.vel[:, 2]**2)), label="Calculated Value")
+    plt.plot(relative_time_list, speed_list, linestyle="None", marker="*", label="Database Value")
+    plt.xlabel("Time [hours]")
+    plt.ylabel("Speed [km/s]")
+    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
+    plt.grid(linestyle="--")
+    plt.legend()
+    plt.savefig("speed.png", bbox_inches="tight", dpi=500)
+
+
+    plt.figure(figsize=(9 , 6))
+    plt.plot(ts_hour, orbital_elements_converted.raan, label="Calculated Value")
+    plt.plot(relative_time_list, raan_list, linestyle="None", marker="*", label="Database Value")
+    plt.xlabel("Time [hours]")
+    plt.ylabel("RAAN [deg]")
+    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
+    plt.grid(linestyle="--")
+    plt.legend
+    plt.savefig("raan.png", bbox_inches="tight", dpi=500)
+
+
+    plt.figure(figsize=(9 , 6))
+    plt.plot(ts_hour, orbital_elements_converted.arg_perigee, label="Calculated Value")
+    plt.plot(relative_time_list, arg_perigee_list, linestyle="None", marker="*", label="Database Value")
+    plt.xlabel("Time [hours]")
+    plt.ylabel("Argument of Perigee [deg]")
+    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
+    plt.grid(linestyle="--")
+    plt.legend()
+    plt.savefig("arg_perigee.png", bbox_inches="tight", dpi=500)
+    # plt.plot(ts, np.sqrt((rs[:, 0]**2) + (rs[:, 1]**2) + (rs[:, 2]**2)))
+    # plt.plot(ts, np.sqrt((vs[:, 0]**2) + (vs[:, 1]**2) + (vs[:, 2]**2)) *1000)
+    # plt.show()
     """
     # PLOTTING #
     
