@@ -1,6 +1,7 @@
 from scipy.optimize import fsolve
 import numpy as np
 import math
+import spiceypy as spice
 
 earth_mu = 398600.4418 # km^3 / s^2
 
@@ -50,10 +51,11 @@ def ellipse(a, b):
     return path_arr
 
 
-def rotation313(arr, s, t, p):
+def rotation313(arr, s, t, p, a):
     s = np.deg2rad(s) # psi , RAAN
     t = np.deg2rad(t) # theta, inclination
     p = np.deg2rad(p) # phi, arg peri
+    a = np.deg2rad(a)
 
     cos_s = np.cos(s)
     sin_s = np.sin(s)
@@ -121,7 +123,9 @@ class TLE:
         self.h = self.specific_energy()[1]
         self.pos_arr = self.object_pos()
         self.vel_arr = self.object_vel()
-        print()
+
+
+        self.spice_pos_arr, self.spice_vel_arr = self.spice_conic()
 
     def year(self):
         return int("20" + str(self.epoch)[0:2])
@@ -167,7 +171,7 @@ class TLE:
 
         pf_orbit = ellipse(self.a, self.b)
         pf_orbit[0] -= self.c  # move the ellipse over by the distance from the center of the ellipse to the focus because Earth is defined as being at 0,0,0
-        self.orbit = rotation313(pf_orbit, self.right_ascension, self.inclination, self.arg_perigee)
+        self.orbit = rotation313(pf_orbit, self.right_ascension, self.inclination, self.arg_perigee, self.theta)
 
         return self.orbit
 
@@ -184,7 +188,7 @@ class TLE:
             self.h[0][0] = 0
             self.h[1][0] = 0
             self.h[2][0] = h_scalar
-        self.h = rotation313(self.h, self.right_ascension, self.inclination, self.arg_perigee)
+        self.h = rotation313(self.h, self.right_ascension, self.inclination, self.arg_perigee, self.theta)
         return self.eta, self.h
 
     def object_pos(self):
@@ -208,7 +212,7 @@ class TLE:
         #self.pos_arr[0][0] = x
         #self.pos_arr[1][0] = y
         #self.pos_arr = pos_arr
-        self.pos_arr = rotation313(pos_arr, self.right_ascension, self.inclination, self.arg_perigee)
+        self.pos_arr = rotation313(pos_arr, self.right_ascension, self.inclination, self.arg_perigee, self.theta)
         return self.pos_arr
 
     def object_vel(self):
@@ -247,5 +251,17 @@ class TLE:
         #     d_arr = -d_arr + np.vstack((self.orbit[0, min_idx + 1], self.orbit[1, min_idx + 1], self.orbit[2, min_idx + 1]))
         # vel_unit = d_arr / np.linalg.norm(d_arr)
         # self.vel_arr = vel_unit * vel_scalar
-        self.vel_arr = rotation313(vel_arr, self.right_ascension, self.inclination, self.arg_perigee)
+        self.vel_arr = rotation313(vel_arr, self.right_ascension, self.inclination, self.arg_perigee, self.theta)
         return self.vel_arr
+
+
+    def spice_conic(self):
+        state = spice.conics([self.perigee, self.eccentricity, np.deg2rad(self.inclination),
+                                           np.deg2rad(self.right_ascension), np.deg2rad(self.arg_perigee),
+                                           np.deg2rad(self.mean_anomaly), self.epoch, earth_mu], self.epoch)
+        pos_arr = state[0:3]
+        vel_arr = state[3:]
+
+        self.spice_pos_arr = pos_arr
+        self.spice_vel_arr = vel_arr
+        return self.spice_pos_arr, self.spice_vel_arr
