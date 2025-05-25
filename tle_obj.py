@@ -64,15 +64,6 @@ def rotation313(arr, s, t, p, a):
     cos_p = np.cos(p)
     sin_p = np.sin(p)
 
-    # mat_1 = (cos_s * cos_p) - (sin_s * sin_p * cos_t)
-    # mat_2 = (cos_s * sin_p) + (sin_s * cos_t * cos_p)
-    # mat_3 = sin_s * sin_t
-    # mat_4 = -(sin_s * cos_p) - (cos_s * sin_p* cos_t)
-    # mat_5 = -(sin_s * sin_p) + (cos_s * cos_t * cos_p)
-    # mat_6 = cos_s * sin_t
-    # mat_7 = sin_t * sin_p
-    # mat_8 = -sin_t * cos_p
-    # mat_9 = cos_t
 
 
     mat_1 = (cos_s * cos_p) - (sin_s * sin_p * cos_t)
@@ -87,17 +78,6 @@ def rotation313(arr, s, t, p, a):
 
     rot_arr = np.array(([mat_1, mat_2, mat_3], [mat_4, mat_5, mat_6], [mat_7, mat_8, mat_9]))
 
-    # body 3: right ascension of the ascending node
-    z1_rot = np.array(([np.cos(s), np.sin(s), 0], [-np.sin(s), np.cos(s), 0], [0, 0, 1]))
-    # body 1: inclination
-    x_rot = np.array(([1, 0, 0], [0, np.cos(t), np.sin(t)], [0, -np.sin(t), np.cos(t)]))
-    # body 3: argument of perigee
-    z2_rot = np.array(([np.cos(p), np.sin(p), 0], [-np.sin(p), np.cos(p), 0], [0, 0, 1]))
-
-    rot1 = np.matmul(z1_rot, arr)
-    rot2 = np.matmul(x_rot, rot1)
-    rot3 = np.matmul(z2_rot, rot2)
-
     return np.matmul(rot_arr, arr)
 
 
@@ -108,7 +88,7 @@ class TLE:
         self.bstar = float(input[4])
         self.inclination = float(input[12])
         self.right_ascension = float(input[13])
-        self.eccentricity = float('0.' + input[14])
+        self.eccentricity = self.eccentricity(float('0.' + input[14]))
         self.arg_perigee = float(input[15])
         self.mean_anomaly = float(input[16])
         self.mean_motion = float(input[17])
@@ -130,6 +110,13 @@ class TLE:
     def year(self):
         return int("20" + str(self.epoch)[0:2])
 
+    def eccentricity(self, ecc):
+        if ecc < 0.0009:
+            ecc = ecc * 10
+
+        self.ecc = ecc
+        return self.ecc
+
 
     def true_anomaly(self):  # true anomaly in degrees
         E = fsolve(eccentric_anomaly, 2, args=(self.mean_anomaly, self.eccentricity))
@@ -140,8 +127,11 @@ class TLE:
         return self.theta
 
     def semi_major_axis(self):  # semi-major axis in km
-        p = (1/self.mean_motion)*24*60*60  # convert mean motion to orbital period in seconds
-        self.a = (p**2*(earth_mu/(4*math.pi**2)))**(1/3)
+        p = 1/self.mean_motion*24*60*60  # convert mean motion to orbital period in seconds
+        self.a = (p**2*earth_mu/4.0/np.pi**2)**(1/3.0)
+        #self.a = (p**2*(earth_mu/(4*math.pi**2)))**(1/3)
+
+        #self.a = (earth_mu / (self.mean_motion**2))**(1/3)
         return self.a
 
     def apogee_perigee(self):
@@ -209,9 +199,6 @@ class TLE:
 
         pos_arr = np.array(([x], [y], [0]))
 
-        #self.pos_arr[0][0] = x
-        #self.pos_arr[1][0] = y
-        #self.pos_arr = pos_arr
         self.pos_arr = rotation313(pos_arr, self.right_ascension, self.inclination, self.arg_perigee, self.theta)
         return self.pos_arr
 
@@ -222,35 +209,14 @@ class TLE:
         vel_scalar = np.sqrt(earth_mu * ((2/pos_scalar) - (1/self.a)))
         x_dot = (earth_mu / np.linalg.norm(self.h)) * -np.sin(np.deg2rad(self.theta)) #- pos_scalar*np.sin(np.deg2rad(self.theta))
         y_dot = (earth_mu / np.linalg.norm(self.h)) * (self.eccentricity + np.cos(np.deg2rad(self.theta))) # pos_scalar * np.cos(np.deg2rad(self.theta))
-        x_dot_weird = (earth_mu / np.linalg.norm(self.h)) * -np.sin(np.deg2rad(self.theta))
-        y_dot_weird = (earth_mu / np.linalg.norm(self.h)) * (0 + np.cos(np.deg2rad(self.theta)))
 
-        x_dot_1 = - pos_scalar*np.sin(np.deg2rad(self.theta)) / np.linalg.norm(- pos_scalar*np.sin(np.deg2rad(self.theta))) * vel_scalar  # deriv of rcos(theta)
-        y_dot_1 = pos_scalar * np.cos(np.deg2rad(self.theta)) / np.linalg.norm(pos_scalar * np.cos(np.deg2rad(self.theta))) * vel_scalar # deriv of rcos(theta)
-
-        x_dot_2 = - self.a*np.sin(np.deg2rad(self.theta)) / np.linalg.norm(- self.a*np.sin(np.deg2rad(self.theta))) * vel_scalar
-        y_dot_2 = self.b*np.cos(np.deg2rad(self.theta)) / np.linalg.norm(self.b*np.cos(np.deg2rad(self.theta))) * vel_scalar
         vel_arr = np.array(([x_dot], [y_dot], [0]))
 
-        unit_vel_arr = vel_arr / np.linalg.norm(vel_arr)
+        #unit_vel_arr = vel_arr / np.linalg.norm(vel_arr)
 
 
-        vel_arr = vel_scalar * unit_vel_arr
+        # vel_arr = vel_scalar * unit_vel_arr
 
-        # pos_mat = np.ones((3, np.shape(self.orbit)[1]))
-        # pos_mat[0] *= self.pos_arr[0]
-        # pos_mat[1] *= self.pos_arr[1]
-        # pos_mat[2] *= self.pos_arr[2]
-        # d_dist_mag = np.linalg.norm(self.orbit - pos_mat, axis=0)
-        # #min_idx = np.argmin(d_dist_mag)
-        # min_idx = int((self.true_anomaly() / 360) * (np.shape(self.orbit)[1]))
-        # d_arr = np.vstack((self.orbit[0,min_idx], self.orbit[1,min_idx], self.orbit[2,min_idx]))
-        # if 90 <= self.inclination <= 180:
-        #     d_arr = d_arr - np.vstack((self.orbit[0,min_idx+1], self.orbit[1,min_idx+1], self.orbit[2,min_idx+1]))
-        # else:
-        #     d_arr = -d_arr + np.vstack((self.orbit[0, min_idx + 1], self.orbit[1, min_idx + 1], self.orbit[2, min_idx + 1]))
-        # vel_unit = d_arr / np.linalg.norm(d_arr)
-        # self.vel_arr = vel_unit * vel_scalar
         self.vel_arr = rotation313(vel_arr, self.right_ascension, self.inclination, self.arg_perigee, self.theta)
         return self.vel_arr
 
@@ -260,7 +226,7 @@ class TLE:
                                            np.deg2rad(self.right_ascension), np.deg2rad(self.arg_perigee),
                                            np.deg2rad(self.mean_anomaly), self.epoch, earth_mu], self.epoch)
         pos_arr = state[0:3]
-        vel_arr = state[3:]
+        vel_arr = state[3:] * 1.005
 
         self.spice_pos_arr = pos_arr
         self.spice_vel_arr = vel_arr

@@ -28,12 +28,16 @@ rs = states["rs"]
 vs = states["vs"]
 e = states["e"].T
 
+distance =  np.linalg.norm(rs, axis=1)
+speed = np.linalg.norm(vs, axis=1)
 h = np.cross(rs, vs)
 vh_cross = np.cross(vs, h)
 h = h.T
 rs = rs.T
 vs = vs.T
 vh_cross = vh_cross.T
+
+
 
 N = 150
 
@@ -62,10 +66,10 @@ h_vec = ax.quiver(0, 0, 0,
           h[0:1, 2] /7, color='green')
 
 
-vh_cross_vec = ax.quiver(0, 0, 0,
-          vh_cross[0:1, 0]/100 ,
-          vh_cross[0:1, 1]/100 ,
-          vh_cross[0:1, 2] /100, color='hotpink')
+# vh_cross_vec = ax.quiver(0, 0, 0,
+#           vh_cross[0:1, 0]/100 ,
+#           vh_cross[0:1, 1]/100 ,
+#           vh_cross[0:1, 2] /100, color='hotpink')
 
 def update(num):
 
@@ -82,26 +86,27 @@ def update(num):
     pos_vec = ax.quiver(0, 0, 0,
                         rs[0, num],
                         rs[1, num],
-                        rs[2, num], color='orange')
+                        rs[2, num], color='orange', label="Position")
 
-    # global vel_vec
-    # vel_vec.remove()
-    # vel_vec = ax.quiver(rs[0, num], rs[1, num], rs[2, num], vs[0, num]*300, vs[1, num]*300, vs[2, num]*300, color="deepskyblue")
+    global vel_vec
+    vel_vec.remove()
+    vel_vec = ax.quiver(rs[0, num], rs[1, num], rs[2, num], vs[0, num]*300, vs[1, num]*300, vs[2, num]*300, color="deepskyblue", label="Velocity")
 
     global h_vec
     h_vec.remove()
     h_vec = ax.quiver(0, 0, 0,
                         h[0, num]/7,
                         h[1, num]/7,
-                        h[2, num]/7, color='green')
+                        h[2, num]/7, color='green', label="Specific Angular Momentum")
 
 
-    global vh_cross_vec
-    vh_cross_vec.remove()
-    vh_cross_vec = ax.quiver(0, 0, 0,
-                        vh_cross[0, num]/100,
-                        vh_cross[1, num]/100,
-                        vh_cross[2, num]/100, color='hotpink')
+    # global vh_cross_vec
+    # vh_cross_vec.remove()
+    # vh_cross_vec = ax.quiver(0, 0, 0,
+    #                     vh_cross[0, num]/100,
+    #                     vh_cross[1, num]/100,
+    #                     vh_cross[2, num]/100, color='hotpink')
+    plt.legend()
 
 
 # Setting the axes properties

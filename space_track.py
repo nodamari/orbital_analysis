@@ -7,7 +7,9 @@ second line.
 import datetime
 import math
 import pickle
+from bisect import bisect_left
 
+from scipy.cluster.hierarchy import correspond
 from spacetrack import SpaceTrackClient
 import spacetrack.operators as op
 from tle_obj import TLE
@@ -20,27 +22,29 @@ from mpl_toolkits.mplot3d.axes3d import Axes3D
 from sklearn.preprocessing import normalize
 import spiceypy as spice
 
-#plt.style.use('dark_background')
-# plt.rcParams.update({
-#     "lines.color": "dimgray",
-#     "patch.edgecolor": "black",
-#     "text.color": "lightgray",
-#     "axes.facecolor": "black",
-#     "axes.edgecolor": "dimgray",
-#     "axes.labelcolor": "darkgray",
-#     "xtick.color": "darkgray",
-#     "ytick.color": "darkgray",
-#     "grid.color": "gray",
-#     "figure.facecolor": "black",
-#     "figure.edgecolor": "black",
-#     "savefig.facecolor": "black",
-#     "savefig.edgecolor": "black"})
 
 
 earth_radius = 6378.135 # km
 earth_mu = 398600.4418 # km^3 / s^2
 J2 = 1.08262668e-3
 
+def take_closest(list, num):
+    """
+    Assumes myList is sorted. Returns closest value to myNumber.
+
+    If two numbers are equally close, return the smallest number.
+    """
+    pos = bisect_left(list, num)
+    if pos == 0:
+        return list[0]
+    if pos == len(list):
+        return list[-1]
+    before = list[pos - 1]
+    after = list[pos]
+    if after - num < num - before:
+        return after
+    else:
+        return before
 
 def circle(r):
     """
@@ -159,9 +163,9 @@ def diffy_q(t, y):
 
     # J2 correction
     r_J2 = 1.5 * J2 * ((earth_mu * earth_radius**2) / norm_r**4)
-    ax_J2 = r_J2 * r[0] / norm_r * (5 * z2 / r2 - 1)
-    ay_J2 = r_J2 * r[1] / norm_r * (5 * z2 / r2 - 1)
-    az_J2 = r_J2 * r[2] / norm_r * (5 * z2 / r2 - 3)
+    ax_J2 = r_J2 * rx / norm_r * (5 * z2 / r2 - 1)
+    ay_J2 = r_J2 * ry / norm_r * (5 * z2 / r2 - 1)
+    az_J2 = r_J2 * rz / norm_r * (5 * z2 / r2 - 3)
 
     _aj2 = np.linalg.norm(np.array((ax_J2, ay_J2, az_J2)))
     # atmospheric drag
@@ -204,52 +208,19 @@ def read_multiple_tles(tles):
 
 
 if __name__ == '__main__':
+    norad_id = 55473
+    # query TLEs with query_tles.py first
+    with open(f"raw_tles_{norad_id}.pkl", "rb") as f:
+        raw_tles = pickle.load(f)
 
-
-    #get username and password from userpass.txt file
-    with open('userpass.txt') as f:
-        contents = f.readlines()
-    user = contents[0].rstrip('\n')
-    password = contents[1]
-
-    st = SpaceTrackClient(user, password)
-    sat_cat_id = 44952# 25544 # ISS
-
-
-    drange = op.inclusive_range(datetime.datetime(2025, 4, 15),  datetime.datetime(2025, 4, 16))
-    #drange_next = op.inclusive_range(dt.datetime(2021, 10, 14), dt.datetime(2021, 10, 15))
-
-    drange_next = op.inclusive_range(datetime.datetime(2025, 4, 17),  datetime.datetime(2025, 4, 18))
-    sat_tle = st.tle(norad_cat_id=[sat_cat_id], epoch=drange, limit=1,  format='tle')
-    sat_next_tle = st.tle(norad_cat_id=[sat_cat_id], epoch=drange_next, limit=1,  format='tle')
-
-    sat_tle =  tle_cleanup(sat_tle)
-    sat_next_tle = tle_cleanup(sat_next_tle)
-    print(sat_tle)
-
-
-
-    # create TLE object and create arrays for plotting
-    sat = TLE(sat_tle)
-    sat_path = sat.orbit
-    current_pos = sat.pos_arr
-
-    sat_next = TLE(sat_next_tle)
-    sat_next_path = sat_next.orbit
-    next_pos = sat_next.pos_arr
-
-    equator = circle(earth_radius)
-
-    # TLEs for verification
-    two_day  = op.inclusive_range(datetime.datetime(2025, 4, 15),  datetime.datetime(2025, 4, 17, 15))
-    two_day_tles = st.tle(epoch=two_day, format="tle", limit=12, norad_cat_id=sat_cat_id)
-    tle_list = read_multiple_tles(two_day_tles)
+    tle_list = read_multiple_tles(raw_tles)
     tle_dict = {}
 
     first_epoch = -1
     for tle in tle_list:
         tle_object = TLE(tle)
         tle_dict[tle_object.epoch] = {}
+        tle_dict[tle_object.epoch]["object"] = tle_object
         tle_dict[tle_object.epoch]["argument_perigee"] = tle_object.arg_perigee
         tle_dict[tle_object.epoch]["eccentricity"] = tle_object.eccentricity
         tle_dict[tle_object.epoch]["true_anomaly"] = tle_object.true_anomaly()
@@ -257,6 +228,8 @@ if __name__ == '__main__':
         tle_dict[tle_object.epoch]["inclination"] = tle_object.inclination
         tle_dict[tle_object.epoch]["pos_vec"] = tle_object.pos_arr
         tle_dict[tle_object.epoch]["vel_vec"] = tle_object.vel_arr
+        tle_dict[tle_object.epoch]["spice_pos_vec"] = tle_object.spice_pos_arr
+        tle_dict[tle_object.epoch]["spice_vel_vec"] = tle_object.spice_vel_arr
         tle_dict[tle_object.epoch]["distance"] = np.linalg.norm(tle_object.pos_arr)
         tle_dict[tle_object.epoch]["speed"] = np.linalg.norm(tle_object.vel_arr)
         tle_dict[tle_object.epoch]["h_vec"] = tle_object.h
@@ -265,13 +238,13 @@ if __name__ == '__main__':
         days_into_year = tle_object.epoch % 1000
         tle_dict[tle_object.epoch]["datetime_obj"] = datetime.datetime(year=year, month=1, day=1) + datetime.timedelta(days=days_into_year-1)
 
+        # equivalent sim time
         if len(tle_dict) == 1:
             first_epoch = tle_dict[tle_object.epoch]["datetime_obj"]
             tle_dict[tle_object.epoch]["relative_time"] = 0
         else:
             relative_epoch = tle_dict[tle_object.epoch]["datetime_obj"] - first_epoch
-            tle_dict[tle_object.epoch]["relative_time"] = (relative_epoch.days * 24) + ((relative_epoch.seconds + (relative_epoch.microseconds/1000000)) / 3600) # [hr]
-
+            tle_dict[tle_object.epoch]["relative_time"] = ((relative_epoch.days * 24) + ((relative_epoch.seconds + (relative_epoch.microseconds/1000000)) / 3600)) * 3600 # [sec]
 
 
     relative_time_list = []
@@ -293,14 +266,22 @@ if __name__ == '__main__':
         eccentricity_list.append(values["eccentricity"])
 
     # intial position and velocity vectors
-    r0 = [sat.spice_pos_arr[0], sat.spice_pos_arr[1], sat.spice_pos_arr[2]]
-    v0 = [sat.spice_vel_arr[0], sat.spice_vel_arr[1], sat.spice_vel_arr[2]]
 
-    # r0 = [-6208.961622123901, 1725.8629719460453, -1849.7219891674008]
-    # v0 = [0.3030499310583521, -5.09020681256592, -5.78792909541096]
+    tle_dict_keys = list(tle_dict.keys())
+
+    sat = tle_dict[tle_dict_keys[0]]["object"]
+    sat_next = tle_dict[tle_dict_keys[4]]["object"]
+    r0 = [sat.pos_arr[0, 0], sat.pos_arr[1, 0], sat.pos_arr[2, 0]]
+    v0 = [sat.vel_arr[0, 0], sat.vel_arr[1, 0], sat.vel_arr[2, 0]]
+
+    # r0 = [-2384.46, 5729.01, 3050.46]
+    # v0 = [-7.36138, -2.98997, 1.64354]
+    # r0 = [5659.03, 6533.74, 3270.15]
+    # v0 = [-3.8797, 5.11565, -2.2397]
     # time span
     d_epoch = sat_next.epoch - sat.epoch
-    tspan = int(d_epoch)*24*60*60
+    tspan = d_epoch*24*60*60
+    print("T Span: ", tspan/3600, " hours" )
 
     # time step
     dt = 50 # [sec]
@@ -317,30 +298,32 @@ if __name__ == '__main__':
     ys[0] = np.array(y0)  # sets initial values according to r0 and v0
 
 
-    # ode_solution = solve_ivp(fun=diffy_q, t_span=(0, tspan), y0 = y0, method='LSODA', dense_output=False, atol=1e-6, rtol=1e-6)
-    # ys = ode_solution.y
-    # rs = ys[0:3, :].T
-    # vs = ys[3:, :].T
-    # ts = ode_solution.t
-    # print("Length of Solution ", len(ts))
+    ode_solution = solve_ivp(fun=diffy_q, t_span=(0, tspan), y0 = y0, method='LSODA', dense_output=False, atol=1e-6, rtol=1e-7)
+    ys = ode_solution.y
+    rs = ys[0:3, :].T
+    vs = ys[3:, :].T
+    ts = ode_solution.t
+    print("Length of Solution ", len(ts))
 
-    step = 1 # second step because first step defined as initial contidions
+    # step = 1 # second step because first step defined as initial contidions
+    #
+    # # intialize solver
+    # solver = ode(diffy_q)
+    # solver.set_integrator('dop853')
+    # solver.set_initial_value(y0, 0)
+    # #solver.set_f_params(earth_mu, sat.bstar)
+    #
+    # # propagate orbit
+    # while solver.successful() and step < n_steps:
+    #     solver.integrate(solver.t + dt)
+    #     ts[step] = solver.t
+    #     ys[step] = solver.y
+    #     step +=1
+    # rs = ys[:, :3]
+    # vs = ys[:, 3:]
 
-    # intialize solver
-    solver = ode(diffy_q)
-    solver.set_integrator('dopri5')
-    solver.set_initial_value(y0, 0)
-    #solver.set_f_params(earth_mu, sat.bstar)
 
-    # propagate orbit
-    while solver.successful() and step < n_steps:
-        solver.integrate(solver.t+dt)
-        ts[step] = solver.t
-        ys[step] = solver.y
-        step +=1
-    rs = ys[:, :3]
-    vs = ys[:, 3:]
-    rq = 1
+    equator = circle(earth_radius)
 
     orbital_elements_converted = OE(rs, vs)
 
@@ -363,6 +346,26 @@ if __name__ == '__main__':
 
     with open("states.pkl", "wb") as f:
         pickle.dump(states, f)
+
+
+    # for key, value in tle_dict.items():
+    #     tle = tle_dict[key]
+    #     relative_time = tle["relative_time"]
+    #     pos_vec = tle["pos_vec"]
+    #     vel_vec = tle["vel_vec"]
+    #
+    #     closest_time = take_closest(list(ts), relative_time)
+    #     closest_time_idx = int(closest_time/dt)
+    #     corresponding_pos = rs[closest_time_idx]
+    #
+    #     diff = pos_vec[:,0] - corresponding_pos
+    #     print(pos_vec[:,0])
+    #     print(corresponding_pos)
+    #     print(np.linalg.norm(diff))
+    #     print()
+
+
+
     # Plotting
     ts_hour = ts / 3600
     # plt.figure(figsize=(9 , 6))
@@ -468,20 +471,21 @@ if __name__ == '__main__':
     # plt.savefig("distance.png", bbox_inches="tight", dpi=500)
 
     # # # true anomaly
-    # plt.figure(figsize=(9 , 6))
-    # ts_hour = ts/3600
-    # plt.plot(ts_hour[0:500], orbital_elements_converted.theta[0:500], alpha=1, label="Calculated Value")
-    # plt.plot(relative_time_list, true_anomaly_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("True Anomaly [deg]")
-    # plt.xlim(xmin=min(ts_hour[0:500])-1, xmax = max(ts_hour[0:500])+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("true_anomaly.png", bbox_inches="tight", dpi=500)
+    plt.figure(figsize=(9 , 6))
+    ts_hour = ts/3600
+    relative_time_list = np.array((relative_time_list)) / 3600
+    plt.plot(ts_hour, orbital_elements_converted.theta, alpha=1, label="Calculated Value")
+    plt.plot(relative_time_list, true_anomaly_list, linestyle="None", marker="*", label="Database Value")
+    plt.xlabel("Time [hours]")
+    plt.ylabel("True Anomaly [deg]")
+    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
+    plt.grid(linestyle="--")
+    plt.legend()
+    plt.savefig("true_anomaly.png", bbox_inches="tight", dpi=500)
 
     # # distance
     plt.figure(figsize=(9 , 6))
-    plt.plot(ts_hour, np.sqrt((orbital_elements_converted.pos[:, 0]**2) + (orbital_elements_converted.pos[:, 1]**2) + (orbital_elements_converted.pos[:, 2]**2)), label="Calculated Value")
+    plt.plot(ts_hour, np.sqrt((rs[:, 0]**2) + (rs[:, 1]**2) + (rs[:, 2]**2)), label="Calculated Value")
     plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
     plt.xlabel("Time [hours]")
     plt.ylabel("Distance [km]")
@@ -639,8 +643,10 @@ if __name__ == '__main__':
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
 
-
-
+    sat_path = sat.orbit
+    sat_next_path = sat_next.orbit
+    current_pos = sat.spice_pos_arr
+    next_pos = sat_next.spice_pos_arr
     # plot orbit of object and equator
     plt.plot(sat_path[0], sat_path[1], sat_path[2], color='deepskyblue', linestyle='solid', linewidth=2,  label='sat')
     ax.plot(sat_next_path[0], sat_next_path[1], sat_next_path[2], color='hotpink', linestyle='solid', linewidth=2, label='sat {0:.2f} hours'.format(d_epoch*24))
@@ -665,7 +671,7 @@ if __name__ == '__main__':
     #           orbital_elements_converted.e_vec[20][0]*ecc_multiplier, orbital_elements_converted.e_vec[20][1]*ecc_multiplier, orbital_elements_converted.e_vec[20][2]*ecc_multiplier, color='orange')
 
 
-    ax.quiver(rs[0][0], rs[0][1], rs[0][2],  vs[0][0]*300,  vs[0][1]*300, vs[0][1]*300, color='deepskyblue')
+    ax.quiver(rs[0][0], rs[0][1], rs[0][2],  vs[0][0]*300,  vs[0][1]*300, vs[0][2]*300, color='deepskyblue')
 
     vh_cross = np.cross(orbital_elements_converted.vel, orbital_elements_converted.h)/earth_mu
     r_normalized = normalize(rs, axis=1, norm='l1')
@@ -688,7 +694,7 @@ if __name__ == '__main__':
     ax.plot(rs[:, 0], rs[:, 1], rs[:, 2], color='blueviolet', linestyle='solid', alpha=0.5,
         label='Numerically calculated trajectory')
 
-    plt.plot(rs[j, 0], rs[j, 1], rs[j, 2], marker='o', markerfacecolor='red', markeredgecolor='red', label=f'{j}')
+    #plt.plot(rs[j, 0], rs[j, 1], rs[j, 2], marker='o', markerfacecolor='red', markeredgecolor='red', label=f'{j}')
     plt.legend()
 
     # plotting Earth

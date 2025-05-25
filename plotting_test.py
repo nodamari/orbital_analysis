@@ -15,6 +15,45 @@ from mpl_toolkits.mplot3d.axes3d import Axes3D
 from sklearn.preprocessing import normalize
 
 if __name__ == '__main__':
+    with open("sc.pkl", "rb") as f:
+        sc = pickle.load( f)
+
+    time = (sc[:, 6] - sc[:, 7])/3600
+
+    # plt.figure()
+    # plt.title("RAAN")
+    # plt.plot(time, sc[:, 5])
+    # plt.grid(linestyle="--")
+    # plt.xlabel("Time [hour]")
+    # plt.ylabel("RAAN [deg]")
+
+    # plt.figure()
+    # plt.title("Argument of Perigee")
+    # plt.plot(time, sc[:, 4])
+    # plt.grid(linestyle="--")
+    # plt.xlabel("Time [hour]")
+    # plt.ylabel("AOP [deg]")
+
+    plt.figure()
+    plt.title("True Anomaly")
+    plt.plot(time, sc[:,3])
+    plt.grid(linestyle="--")
+    plt.xlabel("Time [hour]")
+    plt.ylabel("TA [deg]")
+
+    # plt.figure()
+    # plt.title("Eccentricity")
+    # plt.plot(time, sc[:,1])
+    # plt.grid(linestyle="--")
+    # plt.xlabel("Time [hour]")
+    # plt.ylabel("")
+
+
+
+    plt.show()
+
+"""
+if __name__ == '__main__':
     with open("states.pkl", "rb") as f:
         j2 = pickle.load(f)
 
@@ -57,3 +96,4 @@ if __name__ == '__main__':
 
     plt.show()
 
+"""

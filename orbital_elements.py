@@ -81,6 +81,7 @@ class OE:
             vh_norm = np.linalg.norm(vh_cross)
             h_scalar = np.linalg.norm(true_h)
             e1[i] = np.cross(self.vel[i], self.h[i]) / earth_mu
+
             e1_norm = np.linalg.norm(np.cross(self.vel[i], self.h[i])) / earth_mu
 
             e2[i] = self.pos[i] / np.linalg.norm(self.pos[i])
@@ -114,8 +115,7 @@ class OE:
         self.theta = np.zeros((length, 1))
 
         for i in range(length):
-            pos_norm = np.linalg.norm(self.pos[i])
-            self.theta[i] = np.rad2deg(np.arccos(np.dot(self.e_vec[i], self.pos[i]) / (self.e[i] * pos_norm)))
+            self.theta[i] = np.rad2deg(np.arccos(np.dot(self.e_vec[i], self.pos[i]) / (self.e[i] * self.r[i])))
             if np.dot(self.pos[i], self.vel[i]) < 0:
                 self.theta[i] = 360 - self.theta[i]
         return self.theta
