@@ -2,7 +2,7 @@ from scipy.optimize import fsolve
 import numpy as np
 import math
 import spiceypy as spice
-
+import datetime
 earth_mu = 398600.4418 # km^3 / s^2
 
 
@@ -85,10 +85,11 @@ class TLE:
     def __init__(self, input):
         self.norad_cat_id = input[1]
         self.epoch = float(input[3])
+        self.datetime = self.datetime(self.epoch)
         self.bstar = float(input[4])
         self.inclination = float(input[12])
         self.right_ascension = float(input[13])
-        self.eccentricity = self.eccentricity(float('0.' + input[14]))
+        self.eccentricity = float('0.' + input[14])
         self.arg_perigee = float(input[15])
         self.mean_anomaly = float(input[16])
         self.mean_motion = float(input[17])
@@ -103,19 +104,16 @@ class TLE:
         self.h = self.specific_energy()[1]
         self.pos_arr = self.object_pos()
         self.vel_arr = self.object_vel()
-
-
         self.spice_pos_arr, self.spice_vel_arr = self.spice_conic()
 
-    def year(self):
-        return int("20" + str(self.epoch)[0:2])
 
-    def eccentricity(self, ecc):
-        if ecc < 0.0009:
-            ecc = ecc * 10
+    def datetime(self, epoch):
+        year = int("20" + str(epoch)[0:2])
+        day = epoch % 1000
 
-        self.ecc = ecc
-        return self.ecc
+        epoch_datetime = datetime.datetime(year =year, month=1, day=1) + datetime.timedelta(days=day-1)
+
+        return epoch_datetime
 
 
     def true_anomaly(self):  # true anomaly in degrees

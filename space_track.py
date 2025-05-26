@@ -8,12 +8,11 @@ import datetime
 import math
 import pickle
 from bisect import bisect_left
+import itertools
 
-from scipy.cluster.hierarchy import correspond
-from spacetrack import SpaceTrackClient
-import spacetrack.operators as op
 from tle_obj import TLE
 from orbital_elements import OE
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import PillowWriter, FFMpegWriter
@@ -132,19 +131,6 @@ def tle_cleanup(tle):
 
     return tle
 
-def fun(S, t, mu):
-    rx, ry, rz, vx, vy, vz = S
-
-    r = np.array([rx, ry, rz])
-
-    # norm of radius vector
-    norm_r = np.linalg.norm(r)
-
-    # Earth's gravitational acceleration
-    ax, ay, az = -(r * mu) / (norm_r ** 3)
-
-    return [vx, vy, vz, ax, ay, az]
-
 
 def diffy_q(t, y):
     # unpacking the elements in state
@@ -204,7 +190,26 @@ def read_multiple_tles(tles):
             first_line.extend(second_line)
             tle_list.append(first_line)
 
+    # make sure the list is sorted by the epoch in increasing order, source: https://stackoverflow.com/questions/17555218
+    tle_list.sort(key=lambda x: float(x[3]))
+
+    # remove duplicates, source: https://stackoverflow.com/questions/2213923
+    tle_list = list(tle_list for tle_list, _ in itertools.groupby(tle_list))
+
     return tle_list
+
+
+def plot_output(simulation_time, simulation_data, sim_relative_time, tle_data, ylabel, title, save_name ):
+    plt.figure(figsize=(10,6))
+    plt.plot(simulation_time, simulation_data, label="Calculated Data")
+    plt.plot(sim_relative_time, tle_data, linestyle="None", marker="*", label="Database Data")
+    plt.title(title)
+    plt.xlabel("Time [hours]")
+    plt.ylabel(ylabel)
+    plt.xlim(xmin=min(simulation_time)-1, xmax = max(simulation_time)+1)
+    plt.grid(linestyle="--")
+    plt.legend()
+    plt.savefig(f"{save_name}.png", bbox_inches="tight", dpi=500)
 
 
 if __name__ == '__main__':
@@ -213,40 +218,16 @@ if __name__ == '__main__':
     with open(f"raw_tles_{norad_id}.pkl", "rb") as f:
         raw_tles = pickle.load(f)
 
+    # clean up the raw TLE inputs to list of TLEs
     tle_list = read_multiple_tles(raw_tles)
-    tle_dict = {}
 
-    first_epoch = -1
+    # TLE object list
+    tle_obj_list = []
     for tle in tle_list:
         tle_object = TLE(tle)
-        tle_dict[tle_object.epoch] = {}
-        tle_dict[tle_object.epoch]["object"] = tle_object
-        tle_dict[tle_object.epoch]["argument_perigee"] = tle_object.arg_perigee
-        tle_dict[tle_object.epoch]["eccentricity"] = tle_object.eccentricity
-        tle_dict[tle_object.epoch]["true_anomaly"] = tle_object.true_anomaly()
-        tle_dict[tle_object.epoch]["raan"] = tle_object.right_ascension
-        tle_dict[tle_object.epoch]["inclination"] = tle_object.inclination
-        tle_dict[tle_object.epoch]["pos_vec"] = tle_object.pos_arr
-        tle_dict[tle_object.epoch]["vel_vec"] = tle_object.vel_arr
-        tle_dict[tle_object.epoch]["spice_pos_vec"] = tle_object.spice_pos_arr
-        tle_dict[tle_object.epoch]["spice_vel_vec"] = tle_object.spice_vel_arr
-        tle_dict[tle_object.epoch]["distance"] = np.linalg.norm(tle_object.pos_arr)
-        tle_dict[tle_object.epoch]["speed"] = np.linalg.norm(tle_object.vel_arr)
-        tle_dict[tle_object.epoch]["h_vec"] = tle_object.h
+        tle_obj_list.append(tle_object)
 
-        year = int("20" + str(tle_object.epoch)[0:2])
-        days_into_year = tle_object.epoch % 1000
-        tle_dict[tle_object.epoch]["datetime_obj"] = datetime.datetime(year=year, month=1, day=1) + datetime.timedelta(days=days_into_year-1)
-
-        # equivalent sim time
-        if len(tle_dict) == 1:
-            first_epoch = tle_dict[tle_object.epoch]["datetime_obj"]
-            tle_dict[tle_object.epoch]["relative_time"] = 0
-        else:
-            relative_epoch = tle_dict[tle_object.epoch]["datetime_obj"] - first_epoch
-            tle_dict[tle_object.epoch]["relative_time"] = ((relative_epoch.days * 24) + ((relative_epoch.seconds + (relative_epoch.microseconds/1000000)) / 3600)) * 3600 # [sec]
-
-
+    # store the TLE elements and values into a list to plot later
     relative_time_list = []
     distance_list = []
     speed_list = []
@@ -255,34 +236,56 @@ if __name__ == '__main__':
     arg_perigee_list = []
     inclination_list = []
     eccentricity_list = []
-    for epoch, values in tle_dict.items():
-        relative_time_list.append(values["relative_time"])
-        distance_list.append(values["distance"])
-        speed_list.append(values["speed"])
-        true_anomaly_list.append(values["true_anomaly"])
-        raan_list.append(values["raan"])
-        arg_perigee_list.append(values["argument_perigee"])
-        inclination_list.append(values["inclination"])
-        eccentricity_list.append(values["eccentricity"])
+
+    relative_time = -1
+    for t in range(len(tle_obj_list)):
+        tle_obj = tle_obj_list[t]
+        if t == 0:
+            relative_time = 0
+        else:
+            relative_epoch = tle_obj_list[t].datetime - tle_obj_list[0].datetime
+            relative_time = ((relative_epoch.days * 24) + ((relative_epoch.seconds + (relative_epoch.microseconds/1000000)) / 3600)) # [hour]
+
+        distance = np.linalg.norm(tle_obj.pos_arr)
+        speed = np.linalg.norm(tle_obj.vel_arr)
+        relative_time_list.append(relative_time)
+
+        distance_list.append(distance)
+        speed_list.append(speed)
+        true_anomaly_list.append(tle_obj.theta)
+        raan_list.append(tle_obj.right_ascension)
+        arg_perigee_list.append(tle_obj.arg_perigee)
+        inclination_list.append(tle_obj.inclination)
+        eccentricity_list.append(tle_obj.eccentricity)
 
     # intial position and velocity vectors
-
-    tle_dict_keys = list(tle_dict.keys())
-
-    sat = tle_dict[tle_dict_keys[0]]["object"]
-    sat_next = tle_dict[tle_dict_keys[4]]["object"]
+    sat = tle_obj_list[0]
+    sat_next = tle_obj_list[4]
     r0 = [sat.pos_arr[0, 0], sat.pos_arr[1, 0], sat.pos_arr[2, 0]]
     v0 = [sat.vel_arr[0, 0], sat.vel_arr[1, 0], sat.vel_arr[2, 0]]
 
+    # some other sample states
     # r0 = [-2384.46, 5729.01, 3050.46]
     # v0 = [-7.36138, -2.98997, 1.64354]
     # r0 = [5659.03, 6533.74, 3270.15]
     # v0 = [-3.8797, 5.11565, -2.2397]
+
     # time span
     d_epoch = sat_next.epoch - sat.epoch
     tspan = d_epoch*24*60*60
     print("T Span: ", tspan/3600, " hours" )
 
+    y0 = r0 + v0
+
+    ode_solution = solve_ivp(fun=diffy_q, t_span=(0, tspan), y0 = y0, method='LSODA', dense_output=False, atol=1e-6, rtol=1e-7)
+    ys = ode_solution.y
+    rs = ys[0:3, :].T
+    vs = ys[3:, :].T
+    ts = ode_solution.t
+    print("Length of Solution ", len(ts))
+
+    # depricating form of ODE solver call below
+    """
     # time step
     dt = 50 # [sec]
 
@@ -296,350 +299,69 @@ if __name__ == '__main__':
     # intiial contidions
     y0 = r0 + v0 # [rx, ry, rz, vx, vy, vz]
     ys[0] = np.array(y0)  # sets initial values according to r0 and v0
+    step = 1 # second step because first step defined as initial contidions
 
+    # intialize solver
+    solver = ode(diffy_q)
+    solver.set_integrator('dop853')
+    solver.set_initial_value(y0, 0)
+    #solver.set_f_params(earth_mu, sat.bstar)
 
-    ode_solution = solve_ivp(fun=diffy_q, t_span=(0, tspan), y0 = y0, method='LSODA', dense_output=False, atol=1e-6, rtol=1e-7)
-    ys = ode_solution.y
-    rs = ys[0:3, :].T
-    vs = ys[3:, :].T
-    ts = ode_solution.t
-    print("Length of Solution ", len(ts))
-
-    # step = 1 # second step because first step defined as initial contidions
-    #
-    # # intialize solver
-    # solver = ode(diffy_q)
-    # solver.set_integrator('dop853')
-    # solver.set_initial_value(y0, 0)
-    # #solver.set_f_params(earth_mu, sat.bstar)
-    #
-    # # propagate orbit
-    # while solver.successful() and step < n_steps:
-    #     solver.integrate(solver.t + dt)
-    #     ts[step] = solver.t
-    #     ys[step] = solver.y
-    #     step +=1
-    # rs = ys[:, :3]
-    # vs = ys[:, 3:]
+    # propagate orbit
+    while solver.successful() and step < n_steps:
+        solver.integrate(solver.t + dt)
+        ts[step] = solver.t
+        ys[step] = solver.y
+        step +=1
+    rs = ys[:, :3]
+    vs = ys[:, 3:]
+    """
 
 
     equator = circle(earth_radius)
 
     orbital_elements_converted = OE(rs, vs)
 
-    hu = (np.linalg.norm(orbital_elements_converted.h, axis=1) **2) / (earth_mu**2)
-
-    e = np.sqrt(1 + hu * (orbital_elements_converted.v**2 - (2*earth_mu / orbital_elements_converted.r)))
-
-    states = {}
-    states["rs"] = rs
-    states["vs"] = vs
-    states["ts"] = ts
-    states["initial_epoch"] = sat.epoch
-    states["rp"] = sat.perigee
-    states["ecc"] = sat.eccentricity
-    states["inc"] = sat.inclination
-    states["lnode"] = sat.right_ascension
-    states["argp"] = sat.arg_perigee
-    states["m0"] = sat.mean_anomaly
-    states["e"] = orbital_elements_converted.e_vec
-
-    with open("states.pkl", "wb") as f:
-        pickle.dump(states, f)
-
-
-    # for key, value in tle_dict.items():
-    #     tle = tle_dict[key]
-    #     relative_time = tle["relative_time"]
-    #     pos_vec = tle["pos_vec"]
-    #     vel_vec = tle["vel_vec"]
-    #
-    #     closest_time = take_closest(list(ts), relative_time)
-    #     closest_time_idx = int(closest_time/dt)
-    #     corresponding_pos = rs[closest_time_idx]
-    #
-    #     diff = pos_vec[:,0] - corresponding_pos
-    #     print(pos_vec[:,0])
-    #     print(corresponding_pos)
-    #     print(np.linalg.norm(diff))
-    #     print()
-
-
-
-    # Plotting
+    # Plotting orbital elements and other states
     ts_hour = ts / 3600
-    # plt.figure(figsize=(9 , 6))
-    # ts_hour = ts / 3600
-    # plt.plot(ts_hour, orbital_elements_converted.h[:, 0], label="Calculated Value")
-    # #plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Hx [km]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("distance.png", bbox_inches="tight", dpi=500)
-    #
-    # plt.figure(figsize=(9 , 6))
-    # ts_hour = ts / 3600
-    # plt.plot(ts_hour, orbital_elements_converted.h[:, 1], label="Calculated Value")
-    # #plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Hy [km]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("distance.png", bbox_inches="tight", dpi=500)
-    #
-    #
-    # plt.figure(figsize=(9 , 6))
-    # ts_hour = ts / 3600
-    # plt.plot(ts_hour, orbital_elements_converted.h[:, 2], label="Calculated Value")
-    # #plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Hz [km]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("distance.png", bbox_inches="tight", dpi=500)
-
-
-    # plt.figure(figsize=(9 , 6))
-    # plt.plot(ts_hour, np.linalg.norm(orbital_elements_converted.h, axis=1), label="Calculated Value")
-    # #plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("H [km]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("distance.png", bbox_inches="tight", dpi=500)
-
-
-    # plt.figure(figsize=(9 , 6))
-    # plt.plot(ts_hour, np.linalg.norm(orbital_elements_converted.h, axis=1), label="Calculated Value")
-    # #plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("H [km]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("distance.png", bbox_inches="tight", dpi=500)
-
 
     # distance
-    # plt.figure(figsize=(9 , 6))
-    # ts_hour = ts / 3600
-    # plt.plot(ts_hour, orbital_elements_converted.pos[:, 0], label="Calculated Value")
-    # #plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("X [km]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("distance.png", bbox_inches="tight", dpi=500)
-    #
-    # plt.figure(figsize=(9 , 6))
-    # ts_hour = ts / 3600
-    # plt.plot(ts_hour, orbital_elements_converted.pos[:, 1], label="Calculated Value")
-    # #plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Y [km]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("distance.png", bbox_inches="tight", dpi=500)
-    #
-    # plt.figure(figsize=(9 , 6))
-    # ts_hour = ts / 3600
-    # plt.plot(ts_hour, orbital_elements_converted.pos[:, 2], label="Calculated Value")
-    # #plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Z [km]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("distance.png", bbox_inches="tight", dpi=500)
-    #
-    # plt.figure(figsize=(9 , 6))
-    # ts_hour = ts / 3600
-    # plt.plot(ts_hour, np.linalg.norm(rs, axis=1), label="Calculated Value")
-    # #plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Distance [km]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("distance.png", bbox_inches="tight", dpi=500)
+    plot_output(ts_hour, np.sqrt((rs[:, 0] ** 2) + (rs[:, 1] ** 2) + (rs[:, 2] ** 2)),
+                relative_time_list, distance_list,
+                "Distance [km]", "Distance", "distance")
 
-    # # # true anomaly
-    plt.figure(figsize=(9 , 6))
-    ts_hour = ts/3600
-    relative_time_list = np.array((relative_time_list)) / 3600
-    plt.plot(ts_hour, orbital_elements_converted.theta, alpha=1, label="Calculated Value")
-    plt.plot(relative_time_list, true_anomaly_list, linestyle="None", marker="*", label="Database Value")
-    plt.xlabel("Time [hours]")
-    plt.ylabel("True Anomaly [deg]")
-    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    plt.grid(linestyle="--")
-    plt.legend()
-    plt.savefig("true_anomaly.png", bbox_inches="tight", dpi=500)
+    # speed
+    plot_output(ts_hour, np.sqrt((vs[:, 0] ** 2) + (vs[:, 1] ** 2) + (vs[:, 2] ** 2)),
+                relative_time_list, speed_list,
+                "Speed [km/s]", "Speed", "speed")
 
-    # # distance
-    plt.figure(figsize=(9 , 6))
-    plt.plot(ts_hour, np.sqrt((rs[:, 0]**2) + (rs[:, 1]**2) + (rs[:, 2]**2)), label="Calculated Value")
-    plt.plot(relative_time_list, distance_list, linestyle="None", marker="*", label="Database Value")
-    plt.xlabel("Time [hours]")
-    plt.ylabel("Distance [km]")
-    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    plt.grid(linestyle="--")
-    plt.legend()
-    plt.savefig("distance.png", bbox_inches="tight", dpi=500)
-    #
-    # # speed
-    # plt.figure(figsize=(9 , 6))
-    # plt.plot(ts_hour, np.sqrt((orbital_elements_converted.vel[:, 0]**2) + (orbital_elements_converted.vel[:, 1]**2) + (orbital_elements_converted.vel[:, 2]**2)), label="Calculated Value")
-    # plt.plot(relative_time_list, speed_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Speed [km/s]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("speed.png", bbox_inches="tight", dpi=500)
+    # true anomaly
+    plot_output(ts_hour, orbital_elements_converted.theta,
+                relative_time_list, true_anomaly_list,
+                "True Anomaly [deg]", "True Anomaly", "true_anomaly")
 
+    # RAAN
+    plot_output(ts_hour, orbital_elements_converted.raan,
+                relative_time_list, raan_list,
+                "RAAN [deg]", "RAAN", "raan")
 
-    # plt.figure(figsize=(9 , 6))
-    # plt.plot(ts_hour, np.sqrt((orbital_elements_converted.vel[:, 0]**2) + (orbital_elements_converted.vel[:, 1]**2) + (orbital_elements_converted.vel[:, 2]**2)), label="Calculated Value")
-    # plt.plot(relative_time_list, speed_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Speed [km/s]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("speed.png", bbox_inches="tight", dpi=500)
+    # argument of perigee
+    plot_output(ts_hour, orbital_elements_converted.arg_perigee,
+                relative_time_list, arg_perigee_list,
+                "Argument of Perigee [deg]", "Argument of Perigee", "arg_perigee")
 
-    # plt.figure(figsize=(9 , 6))
-    # plt.plot(ts_hour, orbital_elements_converted.vel[:, 0], label="X")
-    # plt.plot(ts_hour, orbital_elements_converted.vel[:, 1], label="Y")
-    # plt.plot(ts_hour, orbital_elements_converted.vel[:, 2], label="Z")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Vel [km/s]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("speed.png", bbox_inches="tight", dpi=500)
-
-
-    #
-    # # RAAN
-    plt.figure(figsize=(9 , 6))
-    plt.plot(ts_hour, orbital_elements_converted.raan, label="Calculated Value")
-    plt.plot(relative_time_list, raan_list, linestyle="None", marker="*", label="Database Value")
-    plt.xlabel("Time [hours]")
-    plt.ylabel("RAAN [deg]")
-    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    plt.grid(linestyle="--")
-    plt.legend()
-    plt.savefig("raan.png", bbox_inches="tight", dpi=500)
-    # # #
-    # # # # argument of perigee
-    plt.figure(figsize=(9 , 6))
-    plt.plot(ts_hour, orbital_elements_converted.arg_perigee, label="Calculated Value")
-    plt.plot(relative_time_list, arg_perigee_list, linestyle="None", marker="*", label="Database Value")
-    plt.xlabel("Time [hours]")
-    plt.ylabel("Argument of Perigee [deg]")
-    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    plt.grid(linestyle="--")
-    plt.legend()
-    plt.savefig("arg_perigee.png", bbox_inches="tight", dpi=500)
-    #
     # inclination
-    # plt.figure(figsize=(9 , 6))
-    # plt.plot(ts_hour, orbital_elements_converted.i, label="Calculated Value")
-    # plt.plot(relative_time_list, inclination_list, linestyle="None", marker="*", label="Database Value")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Inclination [deg]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("inclination.png", bbox_inches="tight", dpi=500)
-    #
-    # # eccentricity
-    plt.figure(figsize=(9 , 6))
-    plt.plot(ts_hour,e, label="Calculated Value")
-    plt.plot(relative_time_list, eccentricity_list, linestyle="None", marker="*", label="Database Value")
-    plt.xlabel("Time [hours]")
-    plt.ylabel("Eccentricity")
-    plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour)+1)
-    plt.grid(linestyle="--")
-    plt.legend()
-    plt.savefig("eccentricity.png", bbox_inches="tight", dpi=500)
+    plot_output(ts_hour, orbital_elements_converted.i,
+                relative_time_list, inclination_list,
+                "Inclination [deg]", "Inclination", "inclination")
+
+    # eccentricity
+    plot_output(ts_hour, orbital_elements_converted.e,
+                relative_time_list, eccentricity_list,
+                "Eccentricity", "Eccentricity", "eccentricity")
 
 
-    # xyz eccentricity
-    # plt.figure(figsize=(9 , 6))
-    # plt.plot(ts_hour, orbital_elements_converted.e_vec[:,0], label="X")
-    # plt.plot(ts_hour, orbital_elements_converted.e_vec[:, 1], label="Y")
-    # plt.plot(ts_hour, orbital_elements_converted.e_vec[:, 2], label="Z")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Eccentricity")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour[30])+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("eccentricity.png", bbox_inches="tight", dpi=500)
-    #
-    # plt.figure(figsize=(9 , 6))
-    # plt.plot(ts_hour, orbital_elements_converted.pos[:,0]/orbital_elements_converted.r[:], label="X")
-    # plt.plot(ts_hour, orbital_elements_converted.pos[:, 1]/orbital_elements_converted.r[:], label="Y")
-    # plt.plot(ts_hour, orbital_elements_converted.pos[:, 2]/orbital_elements_converted.r[:], label="Z")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("Position [km]")
-    # plt.xlim(xmin=min(ts_hour)-1, xmax = max(ts_hour[30])+1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("eccentricity.png", bbox_inches="tight", dpi=500)
-    #
-    # vh_cross = np.cross(orbital_elements_converted.vel, orbital_elements_converted.h) / earth_mu
-    #
-    # plt.figure(figsize=(9, 6))
-    # plt.plot(ts_hour, vh_cross[:, 0], label="X")
-    # plt.plot(ts_hour, vh_cross[:, 1], label="Y")
-    # plt.plot(ts_hour, vh_cross[:, 2], label="Z")
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("V X H [km^3/s^2]")
-    # plt.xlim(xmin=min(ts_hour) - 1, xmax=max(ts_hour[30]) + 1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("eccentricity.png", bbox_inches="tight", dpi=500)
-
-
-
-    # angle between v and h
-
-    # angles = []
-    # for i in range(500):
-    #     angles.append(np.dot(orbital_elements_converted.pos[i], orbital_elements_converted.vel[i]) / orbital_elements_converted.r[i])
-    #     #angles.append(angle(orbital_elements_converted.pos[i], orbital_elements_converted.vel[i]))
-    #     #angles.append(np.linalg.norm(np.cross(orbital_elements_converted.vel[i], orbital_elements_converted.h[i]))/earth_mu)
-    #
-    # r = []
-    # for j in range(500):
-    #     r.append(np.linalg.norm(orbital_elements_converted.pos[j] / orbital_elements_converted.r[j]))
-    # plt.figure(figsize=(9, 6))
-    # plt.plot(ts_hour[0:500], angles, label="e1")
-    # # plt.plot(ts_hour, r, label="e2")
-    # #plt.plot(ts_hour[0:500], np.array(angles) - np.array(r), label='diff')
-    # plt.xlabel("Time [hours]")
-    # plt.ylabel("V and H vecot angle")
-    # plt.xlim(xmin=min(ts_hour[0:500]) - 1, xmax=max(ts_hour[0:500]) + 1)
-    # plt.grid(linestyle="--")
-    # plt.legend()
-    # plt.savefig("eccentricity.png", bbox_inches="tight", dpi=500)
-    #
-    # # PLOTTING #
-    #
-    # # initialize the figure
-    # # writer = PillowWriter(fps=20)
-    # #
-    # #
+    # Plot 3D
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
 
@@ -653,48 +375,11 @@ if __name__ == '__main__':
     plt.plot(current_pos[0], current_pos[1], current_pos[2], marker='o', markerfacecolor='deepskyblue', markeredgecolor='deepskyblue', label='sat current position')
     plt.plot(next_pos[0], next_pos[1], next_pos[2], marker='o', markerfacecolor='hotpink', markeredgecolor='hotpink', label='sat next position')
     plt.plot(rs[:, 0][-1], rs[:, 1][-1], rs[:, 2][-1], marker='o', markerfacecolor='blueviolet', markeredgecolor='blueviolet', label='sat numerical position')
-
-
-
-    #ax.plot(rs[1650:, 0], rs[1650:, 1], rs[1650:, 2], color='blueviolet', linestyle='solid', alpha=0.5, label='Numerically calculated trajectory')
     plt.plot(equator[0], equator[1], equator[2], color='limegreen', linestyle='dashed', label='Equator')
-    #ax.quiver(sat.pos_arr[0], sat.pos_arr[1], sat.pos_arr[2],  sat.vel_arr[0]*300,  sat.vel_arr[1]*300, sat.vel_arr[2]*300, color='deepskyblue')
-
-    # ecc_multiplier = earth_radius/orbital_elements_converted.e[0]
-    # ax.quiver(0, 0, 0,
-    #           orbital_elements_converted.e_vec[0][0]*ecc_multiplier, orbital_elements_converted.e_vec[0][1]*ecc_multiplier, orbital_elements_converted.e_vec[0][2]*ecc_multiplier, color='orange')
-    #
-    # ax.quiver(0, 0, 0,
-    #           orbital_elements_converted.e_vec[10][0]*ecc_multiplier, orbital_elements_converted.e_vec[10][1]*ecc_multiplier, orbital_elements_converted.e_vec[10][2]*ecc_multiplier, color='orange')
-    #
-    # ax.quiver(0, 0, 0,
-    #           orbital_elements_converted.e_vec[20][0]*ecc_multiplier, orbital_elements_converted.e_vec[20][1]*ecc_multiplier, orbital_elements_converted.e_vec[20][2]*ecc_multiplier, color='orange')
-
-
     ax.quiver(rs[0][0], rs[0][1], rs[0][2],  vs[0][0]*300,  vs[0][1]*300, vs[0][2]*300, color='deepskyblue')
-
-    vh_cross = np.cross(orbital_elements_converted.vel, orbital_elements_converted.h)/earth_mu
-    r_normalized = normalize(rs, axis=1, norm='l1')
-
-    e_diff = vh_cross - r_normalized
-    j = 24
-    # ax.quiver(0,0,0, vh_cross[j, 0]*8000, vh_cross[j, 1]*8000, vh_cross[j, 2]*8000, color='darkorange')
-    # ax.quiver(0, 0, 0, orbital_elements_converted.e1[j, 0] * 7000, orbital_elements_converted.e1[j, 1] * 7000, orbital_elements_converted.e1[j, 2] * 7000, color='orange')
-    #
-    # ax.quiver(0, 0, 0, rs[j, 0], rs[j, 1], rs[j, 2], color='red')
-    # ax.quiver(0, 0, 0, orbital_elements_converted.e2[j, 0]*20000, orbital_elements_converted.e2[j, 1]*20000, orbital_elements_converted.e2[j, 2]*20000, color='maroon')
-    #
-    # ax.quiver(0, 0, 0, e_diff[j, 0]*10000, e_diff[j, 1]*10000, e_diff[j, 2]*10000, color='green')
-    #
-    #
-    # ax.quiver(0, 0, 0, orbital_elements_converted.e_vec[j, 0] * 20000000, orbital_elements_converted.e_vec[j, 1] * 20000000, orbital_elements_converted.e_vec[j, 2] * 20000000, color='limegreen')
-
-    #ax.quiver(sat.pos_arr[0], sat.pos_arr[1], sat.pos_arr[2],  sat.vel_arr[0]*300,  sat.vel_arr[1]*300, sat.vel_arr[2]*300, color='deepskyblue')
-
     ax.plot(rs[:, 0], rs[:, 1], rs[:, 2], color='blueviolet', linestyle='solid', alpha=0.5,
         label='Numerically calculated trajectory')
 
-    #plt.plot(rs[j, 0], rs[j, 1], rs[j, 2], marker='o', markerfacecolor='red', markeredgecolor='red', label=f'{j}')
     plt.legend()
 
     # plotting Earth
