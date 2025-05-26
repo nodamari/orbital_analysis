@@ -8,6 +8,9 @@ earth_radius = 6378.135 # km
 earth_mu = 398600.4418 # km^3 / s^2
 J2 = 1.08262668e-3
 
+
+# TODO: have the class accept a list of orbital elements as an initial state input
+
 def default_config():
     default_config = {
                       "orbital_elements": [],
@@ -17,15 +20,14 @@ def default_config():
                       "J2": False,
                       "state2element": True
     }
-
     return default_config
-
 
 
 def state_to_orbital_elements(states):
     """
-    Given a n x 6 array of states, returns a n X 6 array of orbital elements
-    columns are: specific angular momentum, eccentricity, inclination, true anomaly, argument of perigee, RAAN
+    Given an n x 6 array of states [rx, ry, rz, vz, vy, vz]
+    returns an n X 6 array of orbital elements
+    output columns are: specific angular momentum, eccentricity, inclination, true anomaly, argument of perigee, RAAN
     """
 
     pos_vec = states[:, 0:3]
@@ -88,21 +90,19 @@ class SpaceObject:
         # make sure user has inputted some sort of state to create this object
         assert self.config["orbital_elements"] or self.config["state_vector"], "Please input an orbital elements or state vector"
 
-
         self.y0 = self.config["state_vector"]
 
         # propagate the orbit
         self.ys, self.ts = self.propagate_orbit(self.differential_equation, self.config["tspan"], self.y0, self.config["J2"])
         self.ys = self.ys.T
         self.ts = self.ts.reshape(self.ts.size, 1)
+        self.rs = self.ys[:, 0:3]
+        self.vs = self.ys[:, 3:]
+        self.r_norm = np.linalg.norm(self.rs, axis=1)
+        self.v_norm = np.linalg.norm(self.vs, axis=1)
 
         if self.config["state2element"]:
             self.orbital_elements = state_to_orbital_elements(self.ys)
-
-
-        print()
-
-
 
 
     def differential_equation(self, t, y, j2):
@@ -146,21 +146,22 @@ class SpaceObject:
         vs = ys[3:, :].T
         ts = ode_solution.t
         print("Length of Solution: ", len(ts))
-
+        print("T Span: ", tspan / 3600, " hours")
         return ys, ts
 
 
-
 if __name__ == '__main__':
+    print("Uncomment the below block for a sample use case of this object")
+    """
+    # sample use 
     r0 = [-2384.46, 5729.01, 3050.46]
     v0 = [-7.36138, -2.98997, 1.64354]
     config = {"orbital_elements": [],
               "state_vector": r0+v0,
-              "tspan": 48*3600,
+              "tspan": 60*3600,
               "J2": True}
     so = SpaceObject(config)
-
-
-
-
-
+    """
+    # another sample state
+    # r0 = [5659.03, 6533.74, 3270.15]
+    # v0 = [-3.8797, 5.11565, -2.2397]

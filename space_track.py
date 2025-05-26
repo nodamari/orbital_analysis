@@ -1,26 +1,14 @@
-"""
-This script requires tle_obj.py and  userpass.txt files to run.
-tle_obj.py is a class object file.
-userpass.txt is a text file containing the username for space-track.org in the first line and the password in the
-second line.
-"""
-import datetime
 import math
 import pickle
+import os
 from bisect import bisect_left
 import itertools
-
-from tle_obj import TLE
-from orbital_elements import OE
-
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.animation import PillowWriter, FFMpegWriter
-from scipy.integrate import ode, solve_ivp
 from mpl_toolkits.mplot3d.axes3d import Axes3D
-from sklearn.preprocessing import normalize
-import spiceypy as spice
 
+from tle_obj import TLE
+from space_object import SpaceObject
 
 
 earth_radius = 6378.135 # km
@@ -131,7 +119,6 @@ def tle_cleanup(tle):
 
     return tle
 
-
 def diffy_q(t, y):
     # unpacking the elements in state
     rx, ry, rz, vx, vy, vz = y
@@ -198,7 +185,6 @@ def read_multiple_tles(tles):
 
     return tle_list
 
-
 def plot_output(simulation_time, simulation_data, sim_relative_time, tle_data, ylabel, title, save_name ):
     plt.figure(figsize=(10,6))
     plt.plot(simulation_time, simulation_data, label="Calculated Data")
@@ -209,7 +195,7 @@ def plot_output(simulation_time, simulation_data, sim_relative_time, tle_data, y
     plt.xlim(xmin=min(simulation_time)-1, xmax = max(simulation_time)+1)
     plt.grid(linestyle="--")
     plt.legend()
-    plt.savefig(f"{save_name}.png", bbox_inches="tight", dpi=500)
+    plt.savefig(os.path.join("plots", f"{save_name}.png"), bbox_inches="tight", dpi=500)
 
 
 if __name__ == '__main__':
@@ -231,6 +217,7 @@ if __name__ == '__main__':
     relative_time_list = []
     distance_list = []
     speed_list = []
+    angular_momentum_list = []
     true_anomaly_list = []
     raan_list = []
     arg_perigee_list = []
@@ -248,10 +235,12 @@ if __name__ == '__main__':
 
         distance = np.linalg.norm(tle_obj.pos_arr)
         speed = np.linalg.norm(tle_obj.vel_arr)
+        h = np.linalg.norm(tle_obj.h)
         relative_time_list.append(relative_time)
 
         distance_list.append(distance)
         speed_list.append(speed)
+        angular_momentum_list.append(h)
         true_anomaly_list.append(tle_obj.theta)
         raan_list.append(tle_obj.right_ascension)
         arg_perigee_list.append(tle_obj.arg_perigee)
@@ -264,101 +253,64 @@ if __name__ == '__main__':
     r0 = [sat.pos_arr[0, 0], sat.pos_arr[1, 0], sat.pos_arr[2, 0]]
     v0 = [sat.vel_arr[0, 0], sat.vel_arr[1, 0], sat.vel_arr[2, 0]]
 
-    # some other sample states
-    # r0 = [-2384.46, 5729.01, 3050.46]
-    # v0 = [-7.36138, -2.98997, 1.64354]
-    # r0 = [5659.03, 6533.74, 3270.15]
-    # v0 = [-3.8797, 5.11565, -2.2397]
 
     # time span
     d_epoch = sat_next.epoch - sat.epoch
     tspan = d_epoch*24*60*60
-    print("T Span: ", tspan/3600, " hours" )
-
     y0 = r0 + v0
 
-    ode_solution = solve_ivp(fun=diffy_q, t_span=(0, tspan), y0 = y0, method='LSODA', dense_output=False, atol=1e-6, rtol=1e-7)
-    ys = ode_solution.y
-    rs = ys[0:3, :].T
-    vs = ys[3:, :].T
-    ts = ode_solution.t
-    print("Length of Solution ", len(ts))
+    # instantiate SpaceObject here with states
+    config = {"state_vector": r0 + v0,
+              "tspan": tspan,
+              "J2": True}
+    so = SpaceObject(config)
 
-    # depricating form of ODE solver call below
-    """
-    # time step
-    dt = 50 # [sec]
-
-    # total number of steps
-    n_steps = int(np.ceil(tspan/dt))+1
-
-    # intialize arrays
-    ys = np.zeros((n_steps, 6))
-    ts = np.zeros((n_steps, 1))
-
-    # intiial contidions
-    y0 = r0 + v0 # [rx, ry, rz, vx, vy, vz]
-    ys[0] = np.array(y0)  # sets initial values according to r0 and v0
-    step = 1 # second step because first step defined as initial contidions
-
-    # intialize solver
-    solver = ode(diffy_q)
-    solver.set_integrator('dop853')
-    solver.set_initial_value(y0, 0)
-    #solver.set_f_params(earth_mu, sat.bstar)
-
-    # propagate orbit
-    while solver.successful() and step < n_steps:
-        solver.integrate(solver.t + dt)
-        ts[step] = solver.t
-        ys[step] = solver.y
-        step +=1
-    rs = ys[:, :3]
-    vs = ys[:, 3:]
-    """
-
-
-    equator = circle(earth_radius)
-
-    orbital_elements_converted = OE(rs, vs)
 
     # Plotting orbital elements and other states
-    ts_hour = ts / 3600
+    if not os.path.exists("plots"):
+        os.mkdir("plots")
+
+    ts_hour = so.ts / 3600
 
     # distance
-    plot_output(ts_hour, np.sqrt((rs[:, 0] ** 2) + (rs[:, 1] ** 2) + (rs[:, 2] ** 2)),
+    plot_output(ts_hour, so.r_norm,
                 relative_time_list, distance_list,
                 "Distance [km]", "Distance", "distance")
 
     # speed
-    plot_output(ts_hour, np.sqrt((vs[:, 0] ** 2) + (vs[:, 1] ** 2) + (vs[:, 2] ** 2)),
+    plot_output(ts_hour, so.v_norm,
                 relative_time_list, speed_list,
                 "Speed [km/s]", "Speed", "speed")
 
-    # true anomaly
-    plot_output(ts_hour, orbital_elements_converted.theta,
-                relative_time_list, true_anomaly_list,
-                "True Anomaly [deg]", "True Anomaly", "true_anomaly")
+    # specific angular momentum
+    plot_output(ts_hour, so.orbital_elements[:,0],
+                relative_time_list, angular_momentum_list,
+                "H [km^2/s]", "Specific Angular Momentum", "angular_momentum")
 
-    # RAAN
-    plot_output(ts_hour, orbital_elements_converted.raan,
-                relative_time_list, raan_list,
-                "RAAN [deg]", "RAAN", "raan")
-
-    # argument of perigee
-    plot_output(ts_hour, orbital_elements_converted.arg_perigee,
-                relative_time_list, arg_perigee_list,
-                "Argument of Perigee [deg]", "Argument of Perigee", "arg_perigee")
+    # eccentricity
+    plot_output(ts_hour, so.orbital_elements[:,1],
+                relative_time_list, eccentricity_list,
+                "Eccentricity", "Eccentricity", "eccentricity")
 
     # inclination
-    plot_output(ts_hour, orbital_elements_converted.i,
+    plot_output(ts_hour, so.orbital_elements[:,2],
                 relative_time_list, inclination_list,
                 "Inclination [deg]", "Inclination", "inclination")
 
-    # eccentricity
-    plot_output(ts_hour, orbital_elements_converted.e,
-                relative_time_list, eccentricity_list,
-                "Eccentricity", "Eccentricity", "eccentricity")
+    # true anomaly
+    plot_output(ts_hour, so.orbital_elements[:,3],
+                relative_time_list, true_anomaly_list,
+                "True Anomaly [deg]", "True Anomaly", "true_anomaly")
+
+    # argument of perigee
+    plot_output(ts_hour, so.orbital_elements[:,4],
+                relative_time_list, arg_perigee_list,
+                "Argument of Perigee [deg]", "Argument of Perigee", "arg_perigee")
+
+    # RAAN
+    plot_output(ts_hour, so.orbital_elements[:,5],
+                relative_time_list, raan_list,
+                "RAAN [deg]", "RAAN", "raan")
 
 
     # Plot 3D
@@ -369,15 +321,17 @@ if __name__ == '__main__':
     sat_next_path = sat_next.orbit
     current_pos = sat.spice_pos_arr
     next_pos = sat_next.spice_pos_arr
+    equator = circle(earth_radius)
+
     # plot orbit of object and equator
     plt.plot(sat_path[0], sat_path[1], sat_path[2], color='deepskyblue', linestyle='solid', linewidth=2,  label='sat')
     ax.plot(sat_next_path[0], sat_next_path[1], sat_next_path[2], color='hotpink', linestyle='solid', linewidth=2, label='sat {0:.2f} hours'.format(d_epoch*24))
     plt.plot(current_pos[0], current_pos[1], current_pos[2], marker='o', markerfacecolor='deepskyblue', markeredgecolor='deepskyblue', label='sat current position')
     plt.plot(next_pos[0], next_pos[1], next_pos[2], marker='o', markerfacecolor='hotpink', markeredgecolor='hotpink', label='sat next position')
-    plt.plot(rs[:, 0][-1], rs[:, 1][-1], rs[:, 2][-1], marker='o', markerfacecolor='blueviolet', markeredgecolor='blueviolet', label='sat numerical position')
+    plt.plot(so.rs[:, 0][-1], so.rs[:, 1][-1], so.rs[:, 2][-1], marker='o', markerfacecolor='blueviolet', markeredgecolor='blueviolet', label='sat numerical position')
     plt.plot(equator[0], equator[1], equator[2], color='limegreen', linestyle='dashed', label='Equator')
-    ax.quiver(rs[0][0], rs[0][1], rs[0][2],  vs[0][0]*300,  vs[0][1]*300, vs[0][2]*300, color='deepskyblue')
-    ax.plot(rs[:, 0], rs[:, 1], rs[:, 2], color='blueviolet', linestyle='solid', alpha=0.5,
+    ax.quiver(so.rs[0][0], so.rs[0][1], so.rs[0][2],  so.vs[0][0]*300,  so.vs[0][1]*300, so.vs[0][2]*300, color='deepskyblue')
+    ax.plot(so.rs[:, 0], so.rs[:, 1], so.rs[:, 2], color='blueviolet', linestyle='solid', alpha=0.5,
         label='Numerically calculated trajectory')
 
     plt.legend()
